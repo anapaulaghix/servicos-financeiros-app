@@ -1,0 +1,24 @@
+# Dependências e builds
+node_modules/
+dist/
+.angular/
+bin/
+obj/
+out/
+
+# Ambiente e segredos
+.env
+.env.*
+!.env.example
+*.user
+
+# IDE / SO
+.vs/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Enunciado do teste
+*.pdf
