@@ -12,13 +12,15 @@ O enunciado original (PDF) não é versionado.
   - `src/ServicosFinanceiros.Infrastructure` — EF Core, Npgsql, migrations, repositórios; `AddInfrastructure()` registra os serviços
   - `src/ServicosFinanceiros.Api` — controllers, Swagger, tradução de exceções em ProblemDetails; composition root (`Program.cs`)
   - `tests/ServicosFinanceiros.UnitTests` — xUnit, Moq, FluentAssertions
-  - `tests/ServicosFinanceiros.IntegrationTests` — xUnit + Testcontainers (PostgreSQL real; exige Docker rodando)
+  - `tests/ServicosFinanceiros.IntegrationTests` — xUnit + Testcontainers (PostgreSQL e Redis reais) e WebApplicationFactory; exige Docker rodando
 - `frontend/servicos-financeiros/` — Angular 19 + PrimeNG (standalone, OnPush, RxJS, sem SSR)
   - `src/app/core` — modelos, serviços de API, `toApiError`, `toLoadState`; `features/` — telas; `shared/` — blocos reutilizáveis
   - `src/app/layout` — `MainLayoutComponent` (rota pai das telas) e `SidebarComponent`; o `AppComponent` contém só o `<router-outlet />` e deve continuar assim
   - `src/app/shared/input-error` — validação de formulários: importe a `DynamicValidatorMessageDirective` no componente; mensagens em `VALIDATION_ERROR_MESSAGES`, validadores em `CustomValidators`. Não escreva markup de erro por campo nos templates
   - `src/app/theme/app-preset.ts` e `src/styles/_tokens.scss` — identidade visual (modernista); trocar a marca é mexer só neles
-- `docker-compose.yml` (raiz) — postgres + api + web (nginx servindo o Angular e fazendo proxy de `/api`)
+- `docker-compose.yml` (raiz) — postgres + redis + api + web (nginx servindo o Angular e fazendo proxy de `/api`); elasticsearch + kibana no profile opcional `observability`
+- Observabilidade e proteção: health checks (`/health/live`, `/health/ready`), Serilog (`Api/Observability`), rate limiting com Redis (`Infrastructure/RateLimiting` + `Api/RateLimiting`, aplicado com `[RateLimit(...)]`, fail-open)
+- Fora do escopo (documentados como melhorias futuras no README): NgRx, Keycloak, RabbitMQ
 - `.env` (não versionado) guarda as credenciais; `.env.example` é o modelo
 
 Dependências entre camadas: Api → Application/Infrastructure; Infrastructure → Application → Domain.
@@ -34,7 +36,7 @@ dotnet test backend/ServicosFinanceiros.sln                  # inclui integraç�
 dotnet test backend/tests/ServicosFinanceiros.UnitTests      # só unitários, sem Docker
 dotnet run --project backend/src/ServicosFinanceiros.Api
 
-# Banco + API via Docker (exige .env com POSTGRES_USER/POSTGRES_PASSWORD)
+# Stack via Docker (exige .env com POSTGRES_USER, POSTGRES_PASSWORD e REDIS_PASSWORD)
 docker compose up --build
 
 # Migrations (a partir de backend/; a ferramenta dotnet-ef está fixada em dotnet-tools.json)

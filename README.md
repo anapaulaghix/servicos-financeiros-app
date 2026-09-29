@@ -13,10 +13,12 @@ Motor de um serviço financeiro que recebe eventos de crédito e débito e mant�
 |---|---|
 | API | ASP.NET Core (.NET 10, LTS), Controllers, Swagger/OpenAPI (Swashbuckle) |
 | Persistência | PostgreSQL, Entity Framework Core 10 (Npgsql) |
-| Testes (backend) | xUnit, Moq, FluentAssertions, Testcontainers |
+| Testes (backend) | xUnit, Moq, FluentAssertions, Testcontainers (PostgreSQL e Redis), WebApplicationFactory |
+| Observabilidade | Serilog (logs estruturados), Elasticsearch + Kibana (opcional), health checks |
+| Rate limiting | Redis (janela fixa, compartilhada entre instâncias) |
 | Web | Angular 19, TypeScript (strict), RxJS, PrimeNG 19, SCSS |
 | Testes (web) | Jasmine + Karma |
-| Infra | Docker Compose: PostgreSQL, API (.NET) e nginx servindo o Angular |
+| Infra | Docker Compose: PostgreSQL, Redis, API (.NET), nginx servindo o Angular; Elasticsearch e Kibana num profile opcional |
 
 ## Arquitetura
 
@@ -147,14 +149,20 @@ O índice composto sustenta o extrato paginado de uma conta, do lançamento mais
 - [.NET SDK 10](https://dotnet.microsoft.com/download) para rodar/testar o backend fora do Docker (o `global.json` fixa a versão).
 - Node.js 20+ e npm para o frontend.
 
-### Com Docker Compose (PostgreSQL + API)
+### Com Docker Compose
 
 ```bash
-cp .env.example .env      # defina uma senha em POSTGRES_PASSWORD
+cp .env.example .env      # defina as senhas em POSTGRES_PASSWORD e REDIS_PASSWORD
 docker compose up --build
 ```
 
-A API sobe em `http://localhost:8080` (Swagger em `/swagger`), aplica as migrations e cria 3 contas de demonstração (`SEED_DEMO_DATA=true`). O compose se recusa a subir se `POSTGRES_USER` ou `POSTGRES_PASSWORD` não estiverem definidos.
+A API sobe em `http://localhost:8080` (Swagger em `/swagger`), aplica as migrations e cria 3 contas de demonstração (`SEED_DEMO_DATA=true`). O compose se recusa a subir se `POSTGRES_USER`, `POSTGRES_PASSWORD` ou `REDIS_PASSWORD` não estiverem definidos.
+
+Para subir também o **Elasticsearch e o Kibana** (cerca de 1,5 GB de RAM a mais), descomente no `.env` as linhas `COMPOSE_PROFILES=observability` e `ELASTICSEARCH_URL=http://elasticsearch:9200`, ou passe-as no comando:
+
+```bash
+COMPOSE_PROFILES=observability ELASTICSEARCH_URL=http://elasticsearch:9200 docker compose up --build
+```
 
 Exemplo, usando uma conta de demonstração:
 
@@ -172,7 +180,12 @@ Depois de subir:
 |---|---|
 | Aplicação web | http://localhost:4200 |
 | API + Swagger | http://localhost:8080/swagger |
+| Health checks | http://localhost:8080/health/live e http://localhost:8080/health/ready |
 | PostgreSQL | `127.0.0.1:5432` (usuário e senha do `.env`) |
+| Kibana (profile `observability`) | http://localhost:5601 |
+| Elasticsearch (profile `observability`) | http://localhost:9200 |
+
+O Redis não é publicado: só a API o acessa, pela rede interna do Compose.
 
 O `web` é o Angular compilado e servido pelo nginx (sem root), que também encaminha `/api` para a API. Assim o navegador fala com um único host: sem CORS e sem URL de API por ambiente.
 
@@ -181,6 +194,8 @@ O `web` é o Angular compilado e servido pelo nginx (sem root), que também enca
 - Credenciais ficam no `.env`, que **não é versionado** (`.gitignore`). Só o `.env.example`, com valores de exemplo, vai para o repositório.
 - O PostgreSQL é publicado apenas em `127.0.0.1:5432`, então não fica acessível a outras máquinas da rede.
 - A API roda no container com usuário sem privilégios (não é root), e nenhuma senha está no código nem nos `appsettings`.
+- O Redis exige senha (`REDIS_PASSWORD`) e não tem porta publicada.
+- No Elasticsearch/Kibana a segurança está **desligada**, por ser um ambiente local de demonstração, e as portas ficam restritas a `127.0.0.1`. Em produção: TLS, usuários e API keys.
 - A connection string chega à API pela variável `ConnectionStrings__Postgres`. Para rodar a API fora do Docker, use *user secrets*:
 
 ```bash
@@ -207,7 +222,7 @@ Gerar migrations não abre conexão com o banco (usa um `IDesignTimeDbContextFac
 dotnet test backend/ServicosFinanceiros.sln
 ```
 
-Os **testes de integração** usam [Testcontainers](https://testcontainers.com/): sobem um PostgreSQL descartável, então **o Docker precisa estar rodando**. Para rodar só os unitários (sem Docker): `dotnet test backend/tests/ServicosFinanceiros.UnitTests`.
+Os **testes de integração** usam [Testcontainers](https://testcontainers.com/): sobem um PostgreSQL e um Redis descartáveis, então **o Docker precisa estar rodando**. Para rodar só os unitários (sem Docker): `dotnet test backend/tests/ServicosFinanceiros.UnitTests`.
 
 ### Frontend
 
@@ -219,6 +234,37 @@ npm run test:ci    # Jasmine + Karma em Chrome headless (precisa do Chrome insta
 ```
 
 Para desenvolver, deixe a API no ar (`docker compose up -d db api`) e rode `npm start`.
+
+## Observabilidade e proteção da API
+
+### Health checks
+
+| Endpoint | O que verifica | Para que serve |
+|---|---|---|
+| `GET /health/live` | Só se o processo responde (nenhuma dependência) | *Liveness*: se falhar, o orquestrador reinicia a instância |
+| `GET /health/ready` | PostgreSQL (`AddDbContextCheck`) e Redis (`PING`) | *Readiness*: se falhar, a instância sai do balanceamento sem ser reiniciada |
+
+Separar os dois evita reiniciar a API só porque o banco oscilou: reiniciar não conserta o banco. O Redis fora do ar deixa o readiness como **Degraded**, e não **Unhealthy**, porque a API continua processando lançamentos sem ele (ver rate limiting). A resposta é um JSON com o status e a duração de cada verificação. Os checks são registrados pela Infrastructure (que conhece as dependências) e mapeados pela Api.
+
+### Logs estruturados (Serilog)
+
+- **Eventos com propriedades, não texto solto.** Ex.: `Lançamento {EventId} processado: {TransactionType} de {Amount} na conta {AccountId}...`. No Elasticsearch, `EventId`, `AccountId`, `Rejection`, `StatusCode` etc. viram campos pesquisáveis e agregáveis ("quantos saldos insuficientes na última hora?").
+- **Console:** texto legível em desenvolvimento; em container, **JSON de uma linha por evento**, pronto para qualquer coletor.
+- **Elasticsearch:** quando `Elasticsearch:Url` está configurado, os eventos vão para o data stream `logs-servicos_financeiros-api` (sink oficial da Elastic). Se o Elasticsearch estiver fora do ar, a API sobe normalmente e o console continua recebendo tudo.
+- **Correlação:** cada evento carrega `TraceId` e `SpanId` da requisição, então todos os logs de uma chamada podem ser filtrados juntos.
+- **O que é logado:** uma linha por requisição HTTP (método, rota, status, duração, IP), cada lançamento processado (só depois do commit, para o log nunca afirmar algo que não foi gravado) e cada recusa de regra de negócio como `Information`, já que recusar é comportamento esperado, não falha. Health checks ficam fora para não poluir.
+
+Para ver no Kibana: **Discover → Create data view**, com o padrão `logs-servicos_financeiros-*`.
+
+### Rate limiting com Redis
+
+- O `POST /api/transactions` aceita **20 requisições a cada 10 segundos por cliente** (configurável em `RateLimiting:Transactions`). Acima disso a API responde **429** com `ProblemDetails` e o cabeçalho `Retry-After`; o front mostra quanto tempo esperar. As leituras não são limitadas.
+- **Por que Redis e não o rate limiter em memória do ASP.NET:** em memória, cada instância da API teria o próprio contador, e duas instâncias dobrariam o limite. No Redis o contador é único.
+- **Atômico:** `INCR` e `PEXPIRE` rodam num único script Lua, então requisições simultâneas nunca furam o limite (há teste com 50 requisições paralelas contra um limite de 10).
+- **Fail-open:** se o Redis cair, a API **permite** as requisições e registra um aviso, em vez de bloquear lançamentos financeiros por causa de uma proteção auxiliar. O problema aparece no readiness como `Degraded`.
+- **IP real do cliente:** a API fica atrás do nginx, então o IP vem de `X-Forwarded-For`. Só redes privadas (a rede do Docker) são aceitas como proxy, para ninguém forjar o próprio IP e burlar o limite.
+- **Por que não cache:** o enunciado oferece "caching **ou** rate limiting". Cachear saldos arriscaria mostrar um valor desatualizado, contrariando a regra de que a interface reflete fielmente o backend.
+- Sem Redis configurado (ex.: rodar a API pelo `dotnet run`), o rate limiting fica desligado.
 
 ## Frontend
 
@@ -278,9 +324,12 @@ Os testes de backend priorizam os cenários críticos do problema, não cobertur
 
 - **Consultas (`AccountQueriesIntegrationTests`)**: listagem com saldo atual, extrato do mais recente para o mais antigo com o impacto no saldo, paginação sem repetir nem pular itens, página além do fim e conta inexistente.
 
-Validei que os testes de concorrência detectam o problema de verdade: removendo o `FOR UPDATE` do repositório, dois deles falham.
+- **Rate limiting (`RedisRateLimiterIntegrationTests`, Redis real)**: libera até o limite e bloqueia com `Retry-After`; cada cliente tem o próprio limite; a janela expira e libera; 50 requisições paralelas contra limite 10 liberam exatamente 10; Redis inacessível permite a requisição e deixa o readiness `Degraded`; sem Redis configurado, nada é limitado.
+- **API ponta a ponta (`ApiIntegrationTests`, `WebApplicationFactory` com PostgreSQL e Redis reais)**: liveness e readiness; 429 com `ProblemDetails`, `Retry-After` e `RateLimit-Remaining`; leituras sem limite; e, atrás de um proxy confiável, o limite contado pelo IP em `X-Forwarded-For`.
 
-**Testes do frontend (68):**
+Validei que os testes detectam os problemas de verdade: removendo o `FOR UPDATE` do repositório, dois testes de concorrência falham; desligando o middleware de rate limiting, os dois testes de 429 falham.
+
+**Testes do frontend (75):**
 
 - **Validação (`shared/input-error`)**: mensagens por validador, token substituível e mensagem genérica para validador sem texto; a diretiva não mostra erro em formulário recém-aberto, mostra ao alterar e ao enviar, troca e remove a mensagem, aplica as classes, respeita `withoutFormValidation`, limpa tudo no reset, exibe erros do servidor e funciona com o critério "ao sair do campo".
 - **Layout**: `AppComponent` só com o roteador, telas renderizadas dentro do layout e navegação com o item ativo.
@@ -295,7 +344,9 @@ Validei que os testes de concorrência detectam o problema de verdade: removendo
 - **Idempotência pela chave primária.** Simples e à prova de corrida, ao custo de acoplar o `eventId` à tabela de lançamentos. Se um mesmo `eventId` pudesse valer em várias contas, seria preciso uma chave composta.
 - **`Account.Apply` devolve o lançamento em vez de o domínio conhecer o repositório.** Mantém o domínio puro; a checagem de duplicidade, que depende do histórico armazenado, fica na Application.
 - **Exceções de domínio para regras violadas.** Deixam o fluxo feliz limpo e são traduzidas em um só lugar. Em caminhos de altíssimo volume, um `Result<T>` evitaria o custo de exceções.
-- **Processamento síncrono.** O evento é processado dentro da requisição. Uma fila (RabbitMQ) desacoplaria a entrada do processamento, mas introduziria consistência eventual na tela; fica como evolução possível.
+- **Processamento síncrono.** O evento é processado dentro da requisição. Uma fila (RabbitMQ) desacoplaria a entrada do processamento, mas introduziria consistência eventual na tela; fica como evolução possível (ver abaixo).
+- **Rate limiting fail-open.** Priorizei a disponibilidade dos lançamentos sobre a proteção contra abuso quando o Redis cai. Num cenário com risco alto de abuso, o inverso (fail-closed) seria defensável.
+- **Elasticsearch opcional.** Fica num profile do Compose para o `docker compose up` padrão continuar leve; a API funciona igual com ou sem ele.
 
 ## Status e próximos passos
 
@@ -309,8 +360,38 @@ Validei que os testes de concorrência detectam o problema de verdade: removendo
 | Docker Compose (PostgreSQL + API) com migrations e seed na subida | Feito |
 | Testes de integração com PostgreSQL (Testcontainers) | Feito |
 | Endpoints de leitura: listar contas, extrato paginado | Feito, com testes de integração |
-| Frontend Angular: contas, extrato paginado e formulário de lançamento | Feito, com 68 testes |
+| Frontend Angular: contas, extrato paginado e formulário de lançamento | Feito, com 75 testes |
 | Serviço `web` (nginx + Angular) no Compose | Feito |
+| Health checks (liveness e readiness) | Feito, com testes (diferencial) |
+| Logs estruturados com Serilog e Elasticsearch | Feito (diferencial) |
+| Rate limiting com Redis | Feito, com testes (diferencial) |
+| Gerência de estado (NgRx), autenticação (Keycloak), mensageria (RabbitMQ) | Melhorias futuras (abaixo) |
 | Criação de contas pela API/tela | Não feito (as contas de demonstração vêm do seed) |
-| Autenticação (Keycloak), mensageria (RabbitMQ), cache (Redis), observabilidade | Não feito (diferenciais opcionais) |
 | Testes end-to-end (navegador automatizado) | Não feito |
+
+## Melhorias futuras
+
+Três diferenciais ficaram de fora de propósito: cada um tem custo alto ou muda o comportamento do que já funciona, e preferi entregar bem o núcleo. Este é o desenho que eu seguiria.
+
+### Gerência de estado (NgRx)
+
+Hoje, RxJS com o operador `toLoadState` e signals resolvem as três telas, que não compartilham estado entre si. O NgRx passa a valer quando várias telas dependem dos mesmos dados; por exemplo, o saldo de uma conta aparecendo na lista, no extrato e no formulário ao mesmo tempo. Eu usaria o **NgRx SignalStore** (mais leve e alinhado aos signals do projeto): um `AccountsStore` com as contas e os saldos, atualizado após cada lançamento, no lugar das recargas feitas por cada tela.
+
+### Autenticação e autorização (Keycloak, OIDC/OAuth2)
+
+- **Keycloak** no Compose, com um realm importado na subida (clientes, papéis e usuários de demonstração).
+- **Front:** login pelo fluxo *Authorization Code com PKCE* (ex.: `angular-auth-oidc-client`), um interceptor HTTP que anexa o token e um guard nas rotas.
+- **API:** `AddJwtBearer` validando emissor e audiência do Keycloak, `[Authorize]` nos controllers e políticas por papel (ex.: só `operador` lança; `consulta` só lê). O Swagger ganharia o fluxo OAuth2.
+- **Rate limiting** passaria a contar por usuário autenticado, e não por IP.
+- **Testes:** um emissor de tokens de teste na `WebApplicationFactory`, sem depender do Keycloak.
+
+### Mensageria (RabbitMQ)
+
+É a mudança mais profunda, porque o `POST` deixa de responder o resultado na hora:
+
+1. A API valida o contrato, grava o evento como **pendente** e o publica na fila, na mesma transação (padrão **Outbox**, para não haver evento gravado sem mensagem nem mensagem sem evento). Responde **202 Accepted** com a URL de status.
+2. Um **consumidor** processa com as mesmas regras de hoje (idempotência pela PK, `FOR UPDATE`, transação), com fila de mensagens com erro (DLQ) e novas tentativas.
+3. **Ordem por conta:** particionar as mensagens por `accountId` (ex.: *consistent hash exchange*), para os eventos de uma mesma conta serem processados em sequência.
+4. **Front:** o estado "processando" passa a ser real; a tela consulta o status (ou recebe por SignalR) até o evento virar processado, recusado por saldo insuficiente ou duplicado.
+
+Ganho: absorver picos e desacoplar quem envia de quem processa. Custo: consistência eventual na tela e mais peças para operar.
