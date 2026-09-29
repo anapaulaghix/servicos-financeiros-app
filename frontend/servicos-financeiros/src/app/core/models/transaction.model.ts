@@ -13,5 +13,6 @@ export const ERROR_TITLES: Record<ApiErrorKind, string> = {
   network: 'Sem conexão com o servidor',
   validation: 'Dados inválidos',
   'not-found': 'Conta não encontrada',
+  'rate-limited': 'Aguarde um instante',
   server: 'Falha no servidor',
 };

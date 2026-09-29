@@ -6,6 +6,7 @@ export type ApiErrorKind =
   | 'duplicate'
   | 'insufficient-funds'
   | 'not-found'
+  | 'rate-limited'
   | 'server';
 
 /**
@@ -70,6 +71,8 @@ export function toApiError(error: unknown): ApiError {
         'Saldo insuficiente para este débito. O lançamento foi recusado.',
         422,
       );
+    case 429:
+      return new ApiError('rate-limited', rateLimitedMessage(error), 429);
     default:
       return new ApiError(
         'server',
@@ -77,6 +80,16 @@ export function toApiError(error: unknown): ApiError {
         error.status,
       );
   }
+}
+
+/** Usa o Retry-After (em segundos) enviado pela API para dizer quanto tempo esperar. */
+function rateLimitedMessage(error: HttpErrorResponse): string {
+  const seconds = Number(error.headers?.get('Retry-After'));
+  const wait = Number.isFinite(seconds) && seconds > 0
+    ? `Aguarde ${seconds} ${seconds === 1 ? 'segundo' : 'segundos'}`
+    : 'Aguarde alguns segundos';
+
+  return `Muitos lançamentos em pouco tempo. ${wait} e tente novamente; nada foi lançado.`;
 }
 
 function normalizeFieldErrors(errors: Record<string, string[]> | undefined): Record<string, string[]> {

@@ -257,6 +257,24 @@ describe('NewTransactionComponent', () => {
       http.expectOne('/api/accounts').flush(ACCOUNTS);
     });
 
+    it('limite de requisições (429): pede para aguardar e o reenvio dos mesmos dados usa o mesmo eventId', () => {
+      fillValid();
+      submit();
+      const first = expectPost();
+      first.flush({}, { status: 429, statusText: 'Too Many Requests', headers: { 'Retry-After': '3' } });
+      fixture.detectChanges();
+
+      expect(textOf(root())).toContain('Aguarde um instante');
+      expect(textOf(root())).toContain('Aguarde 3 segundos');
+
+      // Nada foi processado: a mesma chave é reaproveitada quando o usuário tenta de novo.
+      submit();
+      const retry = expectPost();
+      expect(retry.request.body.eventId).toBe(first.request.body.eventId);
+      retry.flush(result);
+      http.expectOne('/api/accounts').flush(ACCOUNTS);
+    });
+
     it('validação do servidor (400): mostra o erro no campo correspondente', () => {
       fillValid();
 

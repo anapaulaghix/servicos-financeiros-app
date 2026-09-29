@@ -1,4 +1,4 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 
 import { ApiError, toApiError } from './api-error';
 
@@ -25,6 +25,20 @@ describe('toApiError', () => {
 
     expect(error.kind).toBe('not-found');
     expect(error.message).toBe('Conta não encontrada.');
+  });
+
+  it('classifica 429 como limite de requisições e usa o Retry-After na mensagem', () => {
+    const error = toApiError(
+      new HttpErrorResponse({ status: 429, headers: new HttpHeaders({ 'Retry-After': '7' }) }),
+    );
+
+    expect(error.kind).toBe('rate-limited');
+    expect(error.message).toContain('Aguarde 7 segundos');
+    expect(error.message).toContain('nada foi lançado');
+  });
+
+  it('em 429 sem Retry-After, pede para aguardar alguns segundos', () => {
+    expect(toApiError(http(429)).message).toContain('Aguarde alguns segundos');
   });
 
   it('classifica 5xx como erro de servidor', () => {
