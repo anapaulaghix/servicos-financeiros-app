@@ -1,13 +1,10 @@
 <app-page-header eyebrow="02 — Operação" title="Novo lançamento" />
 
-@if (accountsState().status === 'error') {
-  @if (accountsState(); as state) {
-    @if (state.status === 'error') {
-      <app-error-panel [error]="state.error" title="Não foi possível carregar as contas" (retry)="reloadAccounts()" />
-    }
+@if (accountsState(); as state) {
+  @if (state.status === 'error') {
+    <app-error-panel [error]="state.error" title="Não foi possível carregar as contas" (retry)="reloadAccounts()" />
   }
 }
-
 <div class="layout">
   <form class="form" [formGroup]="form" (ngSubmit)="submit()" novalidate>
     <div class="field">
@@ -30,9 +27,6 @@
           </span>
         </ng-template>
       </p-select>
-      @if (fieldError('accountId'); as message) {
-        <p-message severity="error" variant="simple" size="small">{{ message }}</p-message>
-      }
     </div>
 
     <div class="field">
@@ -62,9 +56,6 @@
         styleClass="w-full"
         inputStyleClass="w-full num"
       />
-      @if (fieldError('amount'); as message) {
-        <p-message severity="error" variant="simple" size="small">{{ message }}</p-message>
-      }
     </div>
 
     <div class="field">
@@ -78,29 +69,6 @@
         styleClass="w-full"
         appendTo="body"
       />
-      @if (fieldError('occurredAt'); as message) {
-        <p-message severity="error" variant="simple" size="small">{{ message }}</p-message>
-      }
-    </div>
-
-    <div class="field">
-      <label class="eyebrow" for="eventId">Identificador do evento</label>
-      <div class="event-id">
-        <input pInputText id="eventId" formControlName="eventId" class="num" autocomplete="off" spellcheck="false" />
-        <p-button
-          type="button"
-          label="Gerar novo"
-          severity="secondary"
-          [outlined]="true"
-          (onClick)="regenerateEventId()"
-        />
-      </div>
-      <p class="hint muted">
-        Chave de idempotência: reenviar o mesmo identificador nunca lança o valor duas vezes.
-      </p>
-      @if (fieldError('eventId'); as message) {
-        <p-message severity="error" variant="simple" size="small">{{ message }}</p-message>
-      }
     </div>
 
     <p-button
@@ -161,12 +129,9 @@
             <p>{{ current.error.message }}</p>
             @if (isRetrySafe(current.error)) {
               <p class="hint">
-                O identificador do evento foi mantido: reenviar é seguro, pois o mesmo evento nunca é
-                processado duas vezes.
+                Você pode tentar de novo com segurança: se o lançamento já tiver chegado ao servidor,
+                ele não será registrado duas vezes.
               </p>
-            }
-            @if (current.error.kind === 'duplicate') {
-              <p class="hint">Use “Gerar novo” para enviar um lançamento diferente.</p>
             }
           </div>
         </p-message>

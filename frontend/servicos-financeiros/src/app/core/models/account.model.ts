@@ -7,12 +7,10 @@ export interface Account {
   createdAt: string;
 }
 
-/** Linha do extrato: o lançamento e o efeito dele no saldo. */
 export interface StatementEntry {
   eventId: string;
   type: TransactionType;
   amount: number;
-  /** Positivo para crédito, negativo para débito. */
   signedAmount: number;
   balanceAfter: number;
   occurredAt: string;
@@ -27,7 +25,6 @@ export interface Page<T> {
   totalPages: number;
 }
 
-/** Evento financeiro enviado à API. */
 export interface TransactionRequest {
   eventId: string;
   accountId: string;

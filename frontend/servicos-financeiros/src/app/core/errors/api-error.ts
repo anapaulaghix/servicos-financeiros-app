@@ -61,7 +61,7 @@ export function toApiError(error: unknown): ApiError {
     case 409:
       return new ApiError(
         'duplicate',
-        'Este evento já foi processado. Nenhum valor foi lançado novamente.',
+        'Este lançamento já havia sido processado. Nenhum valor foi lançado novamente.',
         409,
       );
     case 422:

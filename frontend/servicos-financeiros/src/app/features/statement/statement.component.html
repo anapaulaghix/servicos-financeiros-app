@@ -54,7 +54,6 @@
           <tr>
             <th>Processado</th>
             <th class="hide-md">Ocorrência</th>
-            <th class="hide-sm">Evento</th>
             <th class="hide-sm">Tipo</th>
             <th class="right">Valor</th>
             <th class="right">Saldo após</th>
@@ -65,7 +64,6 @@
           <tr>
             <td class="num">{{ entry.processedAt | date: 'dd/MM/yy HH:mm' }}</td>
             <td class="num hide-md">{{ entry.occurredAt | date: 'dd/MM/yy HH:mm' }}</td>
-            <td class="num hide-sm" [title]="entry.eventId">{{ entry.eventId.slice(0, 8) }}</td>
             <td class="hide-sm">
               <p-tag
                 [value]="entry.type === 'CREDIT' ? 'Crédito' : 'Débito'"

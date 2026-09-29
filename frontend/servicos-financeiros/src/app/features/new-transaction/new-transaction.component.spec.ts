@@ -28,9 +28,18 @@ describe('NewTransactionComponent', () => {
     fixture.detectChanges();
   };
 
+  /** Envio real (evento submit do DOM), para o FormGroupDirective marcar o formulário como enviado. */
   const submit = (): void => {
-    fixture.debugElement.query(By.css('form')).triggerEventHandler('ngSubmit');
+    (fixture.debugElement.query(By.css('form')).nativeElement as HTMLFormElement).dispatchEvent(
+      new Event('submit'),
+    );
     fixture.detectChanges();
+  };
+
+  /** Mensagem de validação exibida abaixo do campo (inserida pela DynamicValidatorMessageDirective). */
+  const fieldError = (hostSelector: string): string | null => {
+    const error = root().querySelector(`${hostSelector} + app-input-error`);
+    return error ? textOf(error as HTMLElement) : null;
   };
 
   const fillValid = (type: 'CREDIT' | 'DEBIT' = 'CREDIT', amount = 250.5): void => {
@@ -52,12 +61,16 @@ describe('NewTransactionComponent', () => {
   afterEach(() => http.verify());
 
   describe('validação do formulário', () => {
-    it('não envia nada e mostra os erros quando o formulário está vazio', () => {
+    it('não mostra erros num formulário recém-aberto', () => {
+      expect(root().querySelector('app-input-error')).toBeNull();
+    });
+
+    it('não envia nada e mostra os erros abaixo de cada campo quando o formulário está vazio', () => {
       submit();
 
       http.expectNone('/api/transactions');
-      expect(textOf(root())).toContain('Selecione uma conta.');
-      expect(textOf(root())).toContain('Informe o valor.');
+      expect(fieldError('p-select')).toBe('Campo obrigatório.');
+      expect(fieldError('p-inputnumber')).toBe('Campo obrigatório.');
     });
 
     it('rejeita valor zero', () => {
@@ -65,7 +78,7 @@ describe('NewTransactionComponent', () => {
       submit();
 
       http.expectNone('/api/transactions');
-      expect(textOf(root())).toContain('O valor deve ser maior que zero.');
+      expect(fieldError('p-inputnumber')).toBe('O valor mínimo é 0,01.');
     });
 
     it('rejeita valor com mais de 2 casas decimais', () => {
@@ -73,20 +86,18 @@ describe('NewTransactionComponent', () => {
       submit();
 
       http.expectNone('/api/transactions');
-      expect(textOf(root())).toContain('Use no máximo 2 casas decimais.');
+      expect(fieldError('p-inputnumber')).toBe('Use no máximo 2 casas decimais.');
     });
 
-    it('rejeita identificador de evento que não é UUID', () => {
-      fillValid();
-      component.form.controls.eventId.setValue('nao-e-uuid');
+    it('marca visualmente o campo inválido', () => {
       submit();
 
-      http.expectNone('/api/transactions');
-      expect(textOf(root())).toContain('Informe um identificador UUID válido.');
+      expect(root().querySelector('p-inputnumber')!.classList).toContain('field-invalid');
     });
 
-    it('já nasce com um UUID válido como identificador do evento', () => {
-      expect(isUuid(component.form.controls.eventId.value)).toBeTrue();
+    it('não exibe o identificador do evento (chave de idempotência) na tela', () => {
+      expect(root().querySelector('#eventId')).toBeNull();
+      expect(textOf(root())).not.toContain('Identificador do evento');
     });
 
     it('pré-seleciona a conta recebida em ?conta=', () => {
@@ -117,16 +128,16 @@ describe('NewTransactionComponent', () => {
   });
 
   describe('envio', () => {
-    it('envia o evento com o contrato da API e mostra o novo saldo', () => {
+    it('envia o evento com o contrato da API, com um eventId gerado internamente, e mostra o novo saldo', () => {
       fillValid('CREDIT', 250.5);
-      const eventId = component.form.controls.eventId.value;
 
       submit();
       const request = expectPost();
 
       expect(request.request.body).toEqual(
-        jasmine.objectContaining({ eventId, accountId: 'acc-1', type: 'CREDIT', amount: 250.5 }),
+        jasmine.objectContaining({ accountId: 'acc-1', type: 'CREDIT', amount: 250.5 }),
       );
+      expect(isUuid(request.request.body.eventId)).toBeTrue();
       expect(request.request.body.occurredAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
       expect(textOf(root())).toContain('Processando o lançamento');
 
@@ -139,17 +150,36 @@ describe('NewTransactionComponent', () => {
       http.expectOne('/api/accounts').flush(ACCOUNTS);
     });
 
-    it('depois do sucesso, limpa o valor e gera um novo identificador de evento', () => {
+    it('depois do sucesso, limpa o valor e um lançamento igual recebe outro eventId', () => {
       fillValid();
-      const before = component.form.controls.eventId.value;
-
       submit();
-      expectPost().flush(result);
+      const first = expectPost();
+      first.flush(result);
       http.expectOne('/api/accounts').flush(ACCOUNTS);
 
       expect(component.form.controls.amount.value).toBeNull();
-      expect(component.form.controls.eventId.value).not.toBe(before);
-      expect(isUuid(component.form.controls.eventId.value)).toBeTrue();
+
+      // Mesmos dados de novo: é um segundo lançamento legítimo, não um reenvio.
+      component.form.patchValue({ amount: 250.5, occurredAt: new Date(first.request.body.occurredAt) });
+      submit();
+      const second = expectPost();
+
+      expect(second.request.body.eventId).not.toBe(first.request.body.eventId);
+      second.flush(result);
+      http.expectOne('/api/accounts').flush(ACCOUNTS);
+    });
+
+    it('depois do sucesso, mantém conta e tipo e não acusa o valor vazio como erro', () => {
+      fillValid('DEBIT', 10);
+
+      submit();
+      expectPost().flush({ ...result, type: 'DEBIT', amount: 10 });
+      http.expectOne('/api/accounts').flush(ACCOUNTS);
+      fixture.detectChanges();
+
+      expect(component.form.controls.accountId.value).toBe('acc-1');
+      expect(component.form.controls.type.value).toBe('DEBIT');
+      expect(root().querySelector('app-input-error')).toBeNull();
     });
 
     it('não envia duas vezes enquanto o primeiro envio está em andamento', () => {
@@ -164,17 +194,23 @@ describe('NewTransactionComponent', () => {
   });
 
   describe('respostas de erro da API', () => {
-    it('evento duplicado (409): explica e mantém o identificador para nova tentativa', () => {
+    it('duplicado (409): informa que o lançamento já estava registrado e recarrega os saldos', () => {
       fillValid();
-      const eventId = component.form.controls.eventId.value;
-
       submit();
-      expectPost().flush({}, { status: 409, statusText: 'Conflict' });
+      const first = expectPost();
+      first.flush({}, { status: 409, statusText: 'Conflict' });
       fixture.detectChanges();
 
-      expect(textOf(root())).toContain('Evento duplicado');
-      expect(textOf(root())).toContain('já foi processado');
-      expect(component.form.controls.eventId.value).toBe(eventId);
+      expect(textOf(root())).toContain('Lançamento já registrado');
+      expect(textOf(root())).toContain('Nenhum valor foi lançado novamente.');
+      http.expectOne('/api/accounts').flush(ACCOUNTS);
+
+      // Confirmado pelo servidor: um novo envio, mesmo com dados iguais, é outro lançamento.
+      submit();
+      const second = expectPost();
+      expect(second.request.body.eventId).not.toBe(first.request.body.eventId);
+      second.flush(result);
+      http.expectOne('/api/accounts').flush(ACCOUNTS);
     });
 
     it('saldo insuficiente (422): informa que o lançamento foi recusado', () => {
@@ -188,17 +224,37 @@ describe('NewTransactionComponent', () => {
       expect(textOf(root())).toContain('O lançamento foi recusado.');
     });
 
-    it('falha de comunicação: mantém o identificador e diz que reenviar é seguro', () => {
+    it('falha de comunicação: avisa que tentar de novo é seguro e o reenvio usa o mesmo eventId', () => {
       fillValid();
-      const eventId = component.form.controls.eventId.value;
-
       submit();
-      expectPost().error(new ProgressEvent('error'), { status: 0 });
+      const first = expectPost();
+      first.error(new ProgressEvent('error'), { status: 0 });
       fixture.detectChanges();
 
       expect(textOf(root())).toContain('Sem conexão com o servidor');
-      expect(textOf(root())).toContain('reenviar é seguro');
-      expect(component.form.controls.eventId.value).toBe(eventId);
+      expect(textOf(root())).toContain('tentar de novo com segurança');
+
+      // Se a primeira tentativa chegou ao servidor, a mesma chave faz o backend não lançar de novo.
+      submit();
+      const retry = expectPost();
+      expect(retry.request.body.eventId).toBe(first.request.body.eventId);
+      retry.flush(result);
+      http.expectOne('/api/accounts').flush(ACCOUNTS);
+    });
+
+    it('falha de comunicação seguida de alteração nos dados: o novo envio usa outro eventId', () => {
+      fillValid('CREDIT', 100);
+      submit();
+      const first = expectPost();
+      first.error(new ProgressEvent('error'), { status: 0 });
+
+      fillValid('CREDIT', 150);
+      submit();
+      const changed = expectPost();
+
+      expect(changed.request.body.eventId).not.toBe(first.request.body.eventId);
+      changed.flush(result);
+      http.expectOne('/api/accounts').flush(ACCOUNTS);
     });
 
     it('validação do servidor (400): mostra o erro no campo correspondente', () => {
@@ -212,7 +268,7 @@ describe('NewTransactionComponent', () => {
       fixture.detectChanges();
 
       expect(component.form.controls.amount.hasError('server')).toBeTrue();
-      expect(textOf(root())).toContain('O valor informado é inválido.');
+      expect(fieldError('p-inputnumber')).toBe('O valor informado é inválido.');
     });
 
     it('permite corrigir e reenviar depois de um erro', () => {

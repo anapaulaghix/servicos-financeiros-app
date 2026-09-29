@@ -5,30 +5,13 @@ import { RouterLink } from '@angular/router';
 import { TableModule, TablePageEvent } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { BehaviorSubject, combineLatest, scan, switchMap } from 'rxjs';
-
 import { AccountsApi } from '../../core/api/accounts-api.service';
-import { ApiError } from '../../core/errors/api-error';
-import { Page, StatementEntry } from '../../core/models/account.model';
 import { toLoadState } from '../../core/state/load-state';
 import { ErrorPanelComponent } from '../../shared/error-panel/error-panel.component';
 import { LoadingComponent } from '../../shared/loading/loading.component';
 import { PageHeaderComponent } from '../../shared/page-header/page-header.component';
 import { SignedMoneyPipe } from '../../shared/pipes/signed-money.pipe';
-
-interface Paging {
-  pageIndex: number;
-  pageSize: number;
-}
-
-/**
- * Modelo de tela do extrato. Mantém os dados da página anterior enquanto a próxima carrega,
- * para a tabela não piscar nem o paginador sumir a cada troca de página.
- */
-interface StatementView {
-  data?: Page<StatementEntry>;
-  loading: boolean;
-  error?: ApiError;
-}
+import { Paging, StatementView } from '../../core/models/statement.models';
 
 @Component({
   selector: 'app-statement',
@@ -43,7 +26,7 @@ interface StatementView {
     PageHeaderComponent,
     LoadingComponent,
     ErrorPanelComponent,
-    SignedMoneyPipe,
+    SignedMoneyPipe
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './statement.component.html',
@@ -51,8 +34,6 @@ interface StatementView {
 })
 export class StatementComponent {
   private readonly api = inject(AccountsApi);
-
-  /** Vem do parâmetro `:id` da rota (withComponentInputBinding). */
   readonly id = input.required<string>();
 
   protected readonly pageSizeOptions = [5, 10, 25, 50];
@@ -65,7 +46,6 @@ export class StatementComponent {
     switchMap(([id]) => this.api.get(id).pipe(toLoadState())),
   );
 
-  /** A API pagina a partir de 1; a tabela, a partir do índice 0. */
   protected readonly view$ = combineLatest([this.id$, this.paging$, this.reload$]).pipe(
     switchMap(([id, { pageIndex, pageSize }]) =>
       this.api.statement(id, pageIndex + 1, pageSize).pipe(toLoadState()),
