@@ -6,17 +6,18 @@ O enunciado original (PDF) não é versionado.
 
 ## Estrutura
 
-- `backend/` — solution .NET 8 (`ServicosFinanceiros.sln`)
+- `backend/` — solution .NET 10 LTS (`ServicosFinanceiros.sln`)
   - `src/ServicosFinanceiros.Domain` — entidades, regras e exceções de domínio (sem dependências externas)
-  - `src/ServicosFinanceiros.Application` — casos de uso, DTOs e interfaces (portas)
-  - `src/ServicosFinanceiros.Infrastructure` — EF Core, Npgsql, migrations, repositórios
-  - `src/ServicosFinanceiros.Api` — controllers, Swagger, composição de dependências
+  - `src/ServicosFinanceiros.Application` — casos de uso e interfaces (portas); `AddApplication()` registra os serviços
+  - `src/ServicosFinanceiros.Infrastructure` — EF Core, Npgsql, migrations, repositórios; `AddInfrastructure()` registra os serviços
+  - `src/ServicosFinanceiros.Api` — controllers, Swagger, tradução de exceções em ProblemDetails; composition root (`Program.cs`)
   - `tests/ServicosFinanceiros.UnitTests` — xUnit, Moq, FluentAssertions
 - `frontend/servicos-financeiros/` — Angular 19 (componentes, serviços, RxJS, Angular Material)
 - `docker-compose.yml` (raiz) — api + web + postgres (a criar)
 
 Dependências entre camadas: Api → Application/Infrastructure; Infrastructure → Application → Domain.
 O Domain não referencia nenhuma outra camada.
+Cada camada expõe seu próprio registro de IoC (`DependencyInjection.cs`); o `Program.cs` só os compõe.
 
 ## Comandos
 
