@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using ServicosFinanceiros.Api.ExceptionHandling;
 using ServicosFinanceiros.Application;
 using ServicosFinanceiros.Infrastructure;
+using ServicosFinanceiros.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,9 +26,16 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+if (app.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
+{
+    await DatabaseInitializer.InitializeAsync(
+        app.Services,
+        seedDemoData: app.Configuration.GetValue<bool>("Database:SeedOnStartup"));
+}
+
 app.UseExceptionHandler();
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger:Enabled"))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
