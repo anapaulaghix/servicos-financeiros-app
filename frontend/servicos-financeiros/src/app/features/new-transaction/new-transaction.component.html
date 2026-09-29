@@ -1,0 +1,176 @@
+<app-page-header eyebrow="02 — Operação" title="Novo lançamento" />
+
+@if (accountsState().status === 'error') {
+  @if (accountsState(); as state) {
+    @if (state.status === 'error') {
+      <app-error-panel [error]="state.error" title="Não foi possível carregar as contas" (retry)="reloadAccounts()" />
+    }
+  }
+}
+
+<div class="layout">
+  <form class="form" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <div class="field">
+      <label class="eyebrow" for="account">Conta</label>
+      <p-select
+        inputId="account"
+        formControlName="accountId"
+        [options]="accounts()"
+        optionLabel="holderName"
+        optionValue="id"
+        placeholder="Selecione uma conta"
+        [loading]="accountsState().status === 'loading'"
+        styleClass="w-full"
+        appendTo="body"
+      >
+        <ng-template #item let-account>
+          <span class="option">
+            <span>{{ account.holderName }}</span>
+            <span class="num muted">{{ account.balance | currency: 'BRL' }}</span>
+          </span>
+        </ng-template>
+      </p-select>
+      @if (fieldError('accountId'); as message) {
+        <p-message severity="error" variant="simple" size="small">{{ message }}</p-message>
+      }
+    </div>
+
+    <div class="field">
+      <span class="eyebrow" id="type-label">Tipo</span>
+      <p-selectbutton
+        formControlName="type"
+        [options]="typeOptions"
+        optionLabel="label"
+        optionValue="value"
+        [allowEmpty]="false"
+        ariaLabelledBy="type-label"
+      />
+    </div>
+
+    <div class="field">
+      <label class="eyebrow" for="amount">Valor</label>
+      <p-inputnumber
+        inputId="amount"
+        formControlName="amount"
+        mode="currency"
+        currency="BRL"
+        locale="pt-BR"
+        [minFractionDigits]="2"
+        [maxFractionDigits]="2"
+        [min]="0"
+        placeholder="R$ 0,00"
+        styleClass="w-full"
+        inputStyleClass="w-full num"
+      />
+      @if (fieldError('amount'); as message) {
+        <p-message severity="error" variant="simple" size="small">{{ message }}</p-message>
+      }
+    </div>
+
+    <div class="field">
+      <label class="eyebrow" for="occurredAt">Data e hora da ocorrência</label>
+      <p-datepicker
+        inputId="occurredAt"
+        formControlName="occurredAt"
+        [showTime]="true"
+        hourFormat="24"
+        dateFormat="dd/mm/yy"
+        styleClass="w-full"
+        appendTo="body"
+      />
+      @if (fieldError('occurredAt'); as message) {
+        <p-message severity="error" variant="simple" size="small">{{ message }}</p-message>
+      }
+    </div>
+
+    <div class="field">
+      <label class="eyebrow" for="eventId">Identificador do evento</label>
+      <div class="event-id">
+        <input pInputText id="eventId" formControlName="eventId" class="num" autocomplete="off" spellcheck="false" />
+        <p-button
+          type="button"
+          label="Gerar novo"
+          severity="secondary"
+          [outlined]="true"
+          (onClick)="regenerateEventId()"
+        />
+      </div>
+      <p class="hint muted">
+        Chave de idempotência: reenviar o mesmo identificador nunca lança o valor duas vezes.
+      </p>
+      @if (fieldError('eventId'); as message) {
+        <p-message severity="error" variant="simple" size="small">{{ message }}</p-message>
+      }
+    </div>
+
+    <p-button
+      type="submit"
+      label="Enviar lançamento"
+      [loading]="submission().status === 'processing'"
+      [disabled]="submission().status === 'processing'"
+    />
+  </form>
+
+  <aside class="side" aria-live="polite">
+    @if (selectedAccount(); as account) {
+      <section class="summary" aria-label="Conta selecionada">
+        <p class="eyebrow muted">Conta selecionada</p>
+        <p class="summary__holder">{{ account.holderName }}</p>
+
+        <p class="eyebrow muted">Saldo atual</p>
+        <p class="summary__balance num">{{ account.balance | currency: 'BRL' }}</p>
+
+        @if (projectedBalance(); as projected) {
+          <p class="eyebrow muted">Saldo após o lançamento</p>
+          <p class="summary__balance summary__balance--projected num" [class.is-negative]="wouldOverdraw()">
+            {{ projected | currency: 'BRL' }}
+          </p>
+        }
+        @if (wouldOverdraw()) {
+          <p-message severity="warn" size="small">
+            Este débito excede o saldo. O servidor vai recusá-lo.
+          </p-message>
+        }
+      </section>
+    } @else {
+      <p class="muted side__empty">Selecione uma conta para ver o saldo e uma prévia do lançamento.</p>
+    }
+
+    @if (submission(); as current) {
+      @if (current.status === 'processing') {
+        <p-message severity="info" role="status">Processando o lançamento…</p-message>
+      } @else if (current.status === 'success') {
+        <p-message severity="success" role="status">
+          <div class="result">
+            <p class="result__title">Lançamento processado</p>
+            <p>
+              {{ current.result.type === 'CREDIT' ? 'Crédito' : 'Débito' }} de
+              <span class="num">{{ current.result.amount | currency: 'BRL' }}</span>
+              em {{ current.holderName }}.
+            </p>
+            <p>
+              Novo saldo: <strong class="num">{{ current.result.balanceAfter | currency: 'BRL' }}</strong>
+            </p>
+            <a class="result__link" [routerLink]="['/contas', current.result.accountId]">Ver extrato →</a>
+          </div>
+        </p-message>
+      } @else if (current.status === 'error') {
+        <p-message severity="error" role="alert">
+          <div class="result">
+            <p class="result__title">{{ errorTitle(current.error.kind) }}</p>
+            <p>{{ current.error.message }}</p>
+            @if (isRetrySafe(current.error)) {
+              <p class="hint">
+                O identificador do evento foi mantido: reenviar é seguro, pois o mesmo evento nunca é
+                processado duas vezes.
+              </p>
+            }
+            @if (current.error.kind === 'duplicate') {
+              <p class="hint">Use “Gerar novo” para enviar um lançamento diferente.</p>
+            }
+          </div>
+        </p-message>
+      }
+    }
+  </aside>
+</div>

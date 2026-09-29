@@ -1,0 +1,35 @@
+// Ajustes finos sobre o tema PrimeNG (o grosso está em app/theme/app-preset.ts).
+:root {
+  --p-tag-danger-background: var(--accent);
+  --p-tag-danger-color: #fff;
+  --p-tag-contrast-background: var(--ink);
+  --p-tag-contrast-color: var(--paper);
+  --p-progressbar-background: var(--rule-soft);
+  --p-progressbar-value-background: var(--ink);
+  --p-progressbar-height: 6px;
+  --p-message-border-radius: 0;
+}
+
+.p-component,
+.p-inputtext,
+.p-select-label,
+.p-button {
+  font-family: var(--font-sans);
+}
+
+.p-message {
+  border-width: 2px;
+}
+
+.p-tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.p-button {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}

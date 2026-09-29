@@ -1,0 +1,44 @@
+<app-page-header eyebrow="01 — Visão geral" title="Contas">
+  <a class="btn" routerLink="/lancamento">Novo lançamento <span aria-hidden="true">→</span></a>
+</app-page-header>
+
+@if (state$ | async; as state) {
+  @if (state.status === 'loading') {
+    <app-loading label="Carregando contas" />
+  } @else if (state.status === 'error') {
+    <app-error-panel [error]="state.error" title="Não foi possível carregar as contas" (retry)="reload()" />
+  } @else if (state.status === 'ready') {
+    @if (state.data.length === 0) {
+      <p class="empty">Nenhuma conta cadastrada.</p>
+    } @else {
+      <section class="summary" aria-label="Resumo">
+        <div class="summary__item">
+          <p class="eyebrow muted">Saldo consolidado</p>
+          <p class="summary__value num">{{ total(state.data) | currency: 'BRL' }}</p>
+        </div>
+        <div class="summary__item">
+          <p class="eyebrow muted">Contas ativas</p>
+          <p class="summary__value num">{{ state.data.length }}</p>
+        </div>
+      </section>
+
+      <ul class="grid">
+        @for (account of state.data; track account.id; let i = $index) {
+          <li>
+            <a class="card" [routerLink]="['/contas', account.id]">
+              <span class="card__index num">{{ i + 1 < 10 ? '0' + (i + 1) : i + 1 }}</span>
+              <span class="card__holder">{{ account.holderName }}</span>
+              <span class="card__label eyebrow">Saldo atual</span>
+              <span class="card__balance num">{{ account.balance | currency: 'BRL' }}</span>
+              <span class="card__meta">
+                <span class="num">{{ account.id.slice(0, 8) }}</span>
+                <span>Aberta em {{ account.createdAt | date: 'dd/MM/yyyy' }}</span>
+                <span class="card__cta" aria-hidden="true">Ver extrato →</span>
+              </span>
+            </a>
+          </li>
+        }
+      </ul>
+    }
+  }
+}

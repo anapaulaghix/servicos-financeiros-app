@@ -1,0 +1,123 @@
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  min-height: 100vh;
+
+  &__sidebar {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+    height: 100vh;
+    padding: 32px 28px;
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  &__main {
+    min-width: 0;
+    padding: 40px var(--gutter) 96px;
+  }
+
+  &__footnote {
+    margin-top: auto;
+    color: var(--rule-soft);
+    font-size: 11px;
+  }
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  text-decoration: none;
+
+  &__mark {
+    width: 44px;
+    height: 44px;
+    flex: none;
+    color: var(--paper);
+  }
+
+  &__name {
+    font-size: 17px;
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+  }
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #ffffff40;
+
+  &__link {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    padding: 18px 0;
+    border-bottom: 1px solid #ffffff40;
+    font-size: 18px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: padding-left 120ms;
+
+    &:hover {
+      padding-left: 8px;
+    }
+
+    &.is-active {
+      color: var(--accent);
+      font-weight: 800;
+    }
+  }
+
+  &__index {
+    font-size: 12px;
+    opacity: 0.7;
+  }
+}
+
+// Telas estreitas: a barra lateral vira um cabeçalho horizontal.
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+
+    &__sidebar {
+      position: static;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px 32px;
+      height: auto;
+      padding: 16px var(--gutter);
+    }
+
+    &__footnote {
+      display: none;
+    }
+  }
+
+  .nav {
+    flex-direction: row;
+    gap: 24px;
+    border-top: 0;
+
+    &__link {
+      padding: 8px 0;
+      border-bottom: 0;
+      font-size: 15px;
+
+      &:hover {
+        padding-left: 0;
+      }
+    }
+
+    &__index {
+      display: none;
+    }
+  }
+}

@@ -1,0 +1,21 @@
+// Identidade visual em um só lugar: para adaptar o app a outra marca, troque estes valores.
+:root {
+  // Cores — paleta mínima: papel, tinta e um único acento.
+  --paper: #f3f0e8;
+  --paper-raised: #fbf9f4;
+  --ink: #0e0e0e;
+  --ink-soft: #55524a;
+  --rule-soft: #cfc9b8;
+  --accent: #e8391d;
+  --accent-ink: #b32a12;
+
+  // Tipografia
+  --font-sans: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  // Grade e traços
+  --rule: 2px solid var(--ink);
+  --rule-heavy: 4px solid var(--ink);
+  --sidebar-width: 264px;
+  --gutter: clamp(20px, 3.2vw, 48px);
+}

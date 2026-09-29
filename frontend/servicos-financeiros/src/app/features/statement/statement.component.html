@@ -1,0 +1,86 @@
+<a class="back eyebrow" routerLink="/contas"><span aria-hidden="true">←</span> Contas</a>
+
+@if (account$ | async; as account) {
+  @if (account.status === 'ready') {
+    <app-page-header eyebrow="Extrato" [title]="account.data.holderName">
+      <a class="btn" [routerLink]="['/lancamento']" [queryParams]="{ conta: account.data.id }">
+        Novo lançamento <span aria-hidden="true">→</span>
+      </a>
+    </app-page-header>
+
+    <section class="balance" aria-label="Saldo atual">
+      <p class="eyebrow muted">Saldo atual</p>
+      <p class="balance__value num">{{ account.data.balance | currency: 'BRL' }}</p>
+      <p class="balance__id num muted">Conta {{ account.data.id }}</p>
+    </section>
+  } @else if (account.status === 'error') {
+    <app-page-header eyebrow="Extrato" title="Conta" />
+    <app-error-panel
+      [error]="account.error"
+      title="Não foi possível carregar a conta"
+      [retryable]="account.error.kind !== 'not-found'"
+      (retry)="reload()"
+    />
+  } @else {
+    <app-page-header eyebrow="Extrato" title="Conta" />
+  }
+}
+
+@if (view$ | async; as view) {
+  @if (view.error && view.error.kind !== 'not-found') {
+    <app-error-panel [error]="view.error" title="Não foi possível carregar o extrato" (retry)="reload()" />
+  }
+
+  @if (view.data; as data) {
+    @if (data.totalItems === 0) {
+      <p class="empty">Esta conta ainda não tem lançamentos.</p>
+    } @else {
+      <p-table
+        class="statement"
+        [value]="data.items"
+        [lazy]="true"
+        [paginator]="true"
+        [rows]="data.pageSize"
+        [first]="(data.page - 1) * data.pageSize"
+        [totalRecords]="data.totalItems"
+        [rowsPerPageOptions]="pageSizeOptions"
+        [loading]="view.loading"
+        [showCurrentPageReport]="true"
+        currentPageReportTemplate="{first}–{last} de {totalRecords}"
+        aria-label="Extrato da conta"
+        (onPage)="onPage($event)"
+      >
+        <ng-template #header>
+          <tr>
+            <th>Processado</th>
+            <th class="hide-md">Ocorrência</th>
+            <th class="hide-sm">Evento</th>
+            <th class="hide-sm">Tipo</th>
+            <th class="right">Valor</th>
+            <th class="right">Saldo após</th>
+          </tr>
+        </ng-template>
+
+        <ng-template #body let-entry>
+          <tr>
+            <td class="num">{{ entry.processedAt | date: 'dd/MM/yy HH:mm' }}</td>
+            <td class="num hide-md">{{ entry.occurredAt | date: 'dd/MM/yy HH:mm' }}</td>
+            <td class="num hide-sm" [title]="entry.eventId">{{ entry.eventId.slice(0, 8) }}</td>
+            <td class="hide-sm">
+              <p-tag
+                [value]="entry.type === 'CREDIT' ? 'Crédito' : 'Débito'"
+                [severity]="entry.type === 'CREDIT' ? 'contrast' : 'danger'"
+              />
+            </td>
+            <td class="num right amount" [class.amount--debit]="entry.signedAmount < 0">
+              {{ entry.signedAmount | signedMoney }}
+            </td>
+            <td class="num right">{{ entry.balanceAfter | currency: 'BRL' }}</td>
+          </tr>
+        </ng-template>
+      </p-table>
+    }
+  } @else if (view.loading) {
+    <app-loading label="Carregando extrato" />
+  }
+}

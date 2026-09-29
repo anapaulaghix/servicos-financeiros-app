@@ -1,0 +1,21 @@
+:host {
+  display: block;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 24px;
+  border-bottom: var(--rule-heavy);
+
+  &__title {
+    margin-top: 12px;
+    font-size: clamp(2.75rem, 7vw, 5.5rem);
+    font-weight: 800;
+    line-height: 0.92;
+    letter-spacing: -0.045em;
+  }
+}
