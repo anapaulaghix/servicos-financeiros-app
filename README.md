@@ -5,7 +5,7 @@ Motor de um serviço financeiro que recebe eventos de crédito e débito e mant�
 - **`backend/`** — API REST em C# / ASP.NET Core (.NET 10, LTS), PostgreSQL via EF Core.
 - **`frontend/servicos-financeiros/`** — aplicação web em Angular 19.
 
-> **Status:** o backend tem domínio, caso de uso de processamento de eventos, persistência mapeada e o endpoint `POST /api/transactions`, todos com testes. Ainda **não** estão prontos: migrations do EF Core, endpoints de leitura (contas e extrato), as telas do Angular e o `docker-compose.yml`. Veja a [seção de status](#status-e-próximos-passos).
+> **Status:** o backend está funcional e testado contra PostgreSQL real: domínio, caso de uso, migrations, o endpoint `POST /api/transactions` e o Docker Compose (banco + API). Ainda **não** estão prontos os endpoints de leitura (contas e extrato) e o frontend Angular. Veja a [seção de status](#status-e-próximos-passos).
 
 ## Stack
 
@@ -130,19 +130,63 @@ O índice composto sustenta o extrato paginado de uma conta, do lançamento mais
 
 ### Pré-requisitos
 
-- [.NET SDK 10](https://dotnet.microsoft.com/download) (o `global.json` fixa a versão)
-- Node.js 20+ e npm (frontend)
-- PostgreSQL acessível (ver connection string abaixo)
+- [Docker](https://www.docker.com/products/docker-desktop/) com Docker Compose. **Não é preciso instalar o PostgreSQL**: ele roda em container.
+- [.NET SDK 10](https://dotnet.microsoft.com/download) para rodar/testar o backend fora do Docker (o `global.json` fixa a versão).
+- Node.js 20+ e npm para o frontend.
 
-### Backend
+### Com Docker Compose (PostgreSQL + API)
 
 ```bash
-dotnet build backend/ServicosFinanceiros.sln
-dotnet test backend/ServicosFinanceiros.sln
-dotnet run --project backend/src/ServicosFinanceiros.Api
+cp .env.example .env      # defina uma senha em POSTGRES_PASSWORD
+docker compose up --build
 ```
 
-A connection string de desenvolvimento está em `appsettings.Development.json` (`ConnectionStrings:Postgres`). Em outros ambientes, defina a variável `ConnectionStrings__Postgres`. Com a API no ar em desenvolvimento, o Swagger fica em `/swagger`.
+A API sobe em `http://localhost:8080` (Swagger em `/swagger`), aplica as migrations e cria 3 contas de demonstração (`SEED_DEMO_DATA=true`). O compose se recusa a subir se `POSTGRES_USER` ou `POSTGRES_PASSWORD` não estiverem definidos.
+
+Exemplo, usando uma conta de demonstração:
+
+```bash
+curl -X POST http://localhost:8080/api/transactions \
+  -H "Content-Type: application/json" \
+  -d '{"eventId":"'$(uuidgen)'","accountId":"11111111-1111-1111-1111-111111111111","type":"CREDIT","amount":150.75,"occurredAt":"2026-01-30T10:15:00Z"}'
+```
+
+Repetir o mesmo `eventId` devolve `409`; um débito acima do saldo devolve `422`.
+
+O serviço web (Angular) será adicionado ao compose junto com o frontend.
+
+### Segredos e configuração
+
+- Credenciais ficam no `.env`, que **não é versionado** (`.gitignore`). Só o `.env.example`, com valores de exemplo, vai para o repositório.
+- O PostgreSQL é publicado apenas em `127.0.0.1:5432`, então não fica acessível a outras máquinas da rede.
+- A API roda no container com usuário sem privilégios (não é root), e nenhuma senha está no código nem nos `appsettings`.
+- A connection string chega à API pela variável `ConnectionStrings__Postgres`. Para rodar a API fora do Docker, use *user secrets*:
+
+```bash
+dotnet user-secrets set "ConnectionStrings:Postgres" "Host=localhost;Database=servicos_financeiros;Username=app_user;Password=<sua-senha>" \
+  --project backend/src/ServicosFinanceiros.Api
+dotnet run --project backend/src/ServicosFinanceiros.Api   # com Database__MigrateOnStartup=true para aplicar as migrations
+```
+
+### Migrations
+
+Ficam em `backend/src/ServicosFinanceiros.Infrastructure/Persistence/Migrations`. A ferramenta `dotnet-ef` está fixada em `dotnet-tools.json`:
+
+```bash
+cd backend
+dotnet tool restore
+dotnet ef migrations add <Nome> -p src/ServicosFinanceiros.Infrastructure -s src/ServicosFinanceiros.Infrastructure -o Persistence/Migrations
+```
+
+Gerar migrations não abre conexão com o banco (usa um `IDesignTimeDbContextFactory`). Nos ambientes Docker/desenvolvimento a API as aplica na inicialização (`Database__MigrateOnStartup`); em produção o ideal é aplicá-las como etapa separada do deploy.
+
+### Testes do backend
+
+```bash
+dotnet test backend/ServicosFinanceiros.sln
+```
+
+Os **testes de integração** usam [Testcontainers](https://testcontainers.com/): sobem um PostgreSQL descartável, então **o Docker precisa estar rodando**. Para rodar só os unitários (sem Docker): `dotnet test backend/tests/ServicosFinanceiros.UnitTests`.
 
 ### Frontend
 
@@ -153,10 +197,6 @@ npm start     # http://localhost:4200
 npm test
 ```
 
-### Docker Compose
-
-Ainda não implementado. O objetivo é `docker compose up` subir PostgreSQL, API e web.
-
 ## Testes
 
 Os testes de backend priorizam os cenários críticos do problema, não cobertura percentual:
@@ -164,7 +204,9 @@ Os testes de backend priorizam os cenários críticos do problema, não cobertur
 - **Domínio (`AccountTests`)**: crédito, débito, débito igual ao saldo, saldo insuficiente sem alterar o estado, valores não positivos e com mais de 2 casas, e o saldo final igual à soma dos lançamentos.
 - **Aplicação (`ProcessTransactionHandlerTests`)**: evento duplicado não altera a conta, violação de unicidade concorrente vira "duplicado", saldo insuficiente não persiste nada, conta inexistente e execução dentro do unit of work.
 
-**Limitação conhecida:** a transacionalidade real, o `FOR UPDATE` e a violação de chave primária dependem do PostgreSQL e ainda não têm teste de integração. Os testes atuais usam dependências falsas. O próximo passo natural é testar a infraestrutura contra um PostgreSQL de verdade (Testcontainers).
+- **Integração (`ProcessTransactionIntegrationTests`, PostgreSQL real via Testcontainers)**: crédito grava lançamento e saldo juntos; o mesmo evento enviado duas vezes conta uma única vez; débito acima do saldo não deixa rastro; **10 eventos idênticos em paralelo processam exatamente 1**; **10 débitos concorrentes de 20 numa conta de 100 permitem só 5 e o saldo nunca fica negativo**; o saldo final é igual à soma do histórico após atividade concorrente; e uma falha ao gravar desfaz a atualização do saldo (atomicidade).
+
+Validei que os testes de concorrência detectam o problema de verdade: removendo o `FOR UPDATE` do repositório, dois deles falham.
 
 ## Decisões e trade-offs
 
@@ -180,10 +222,10 @@ Os testes de backend priorizam os cenários críticos do problema, não cobertur
 |---|---|
 | Domínio (`Account`, `Transaction`, regras) | Feito, com testes |
 | Caso de uso `ProcessTransaction` (idempotência, unit of work) | Feito, com testes |
-| Persistência: `DbContext`, mapeamentos, repositórios, unit of work | Feito (sem teste de integração) |
+| Persistência: `DbContext`, mapeamentos, repositórios, unit of work | Feito, com testes de integração |
+| Migrations do EF Core | Feito (`InitialCreate`) |
 | `POST /api/transactions` + Swagger + `ProblemDetails` | Feito |
-| Migrations do EF Core | Pendente |
+| Docker Compose (PostgreSQL + API) com migrations e seed na subida | Feito |
+| Testes de integração com PostgreSQL (Testcontainers) | Feito |
 | Endpoints de leitura: listar contas, extrato paginado | Pendente |
-| Frontend Angular (contas, extrato, formulário) | Pendente (apenas o projeto gerado) |
-| `docker-compose.yml` e Dockerfiles | Pendente |
-| Testes de integração com PostgreSQL | Pendente |
+| Frontend Angular (contas, extrato, formulário) e serviço `web` no compose | Pendente (apenas o projeto gerado) |

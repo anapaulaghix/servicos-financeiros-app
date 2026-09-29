@@ -12,8 +12,10 @@ O enunciado original (PDF) não é versionado.
   - `src/ServicosFinanceiros.Infrastructure` — EF Core, Npgsql, migrations, repositórios; `AddInfrastructure()` registra os serviços
   - `src/ServicosFinanceiros.Api` — controllers, Swagger, tradução de exceções em ProblemDetails; composition root (`Program.cs`)
   - `tests/ServicosFinanceiros.UnitTests` — xUnit, Moq, FluentAssertions
+  - `tests/ServicosFinanceiros.IntegrationTests` — xUnit + Testcontainers (PostgreSQL real; exige Docker rodando)
 - `frontend/servicos-financeiros/` — Angular 19 (componentes, serviços, RxJS, Angular Material)
-- `docker-compose.yml` (raiz) — api + web + postgres (a criar)
+- `docker-compose.yml` (raiz) — postgres + api (o serviço web entra junto com o frontend)
+- `.env` (não versionado) guarda as credenciais; `.env.example` é o modelo
 
 Dependências entre camadas: Api → Application/Infrastructure; Infrastructure → Application → Domain.
 O Domain não referencia nenhuma outra camada.
@@ -24,8 +26,16 @@ Cada camada expõe seu próprio registro de IoC (`DependencyInjection.cs`); o `P
 ```bash
 # Backend
 dotnet build backend/ServicosFinanceiros.sln
-dotnet test backend/ServicosFinanceiros.sln
+dotnet test backend/ServicosFinanceiros.sln                  # inclui integração (Docker)
+dotnet test backend/tests/ServicosFinanceiros.UnitTests      # só unitários, sem Docker
 dotnet run --project backend/src/ServicosFinanceiros.Api
+
+# Banco + API via Docker (exige .env com POSTGRES_USER/POSTGRES_PASSWORD)
+docker compose up --build
+
+# Migrations (a partir de backend/; a ferramenta dotnet-ef está fixada em dotnet-tools.json)
+dotnet tool restore
+dotnet ef migrations add <Nome> -p src/ServicosFinanceiros.Infrastructure -s src/ServicosFinanceiros.Infrastructure -o Persistence/Migrations
 
 # Frontend (em frontend/servicos-financeiros)
 npm install
@@ -53,7 +63,7 @@ Valores monetários usam `decimal` (nunca `double`/`float`). Concorrência na me
 - Testes priorizam cenários críticos: saldo insuficiente, duplicidade, concorrência (back); validações de formulário, estados de tela e serviços (front).
 - Commits pequenos, mensagens no padrão Conventional Commits (`feat:`, `fix:`, `test:`, `chore:`), em português.
 - Nunca adicionar `Co-Authored-By` nem linhas de atribuição em commits ou PRs.
-- Não commitar segredos; usar `.env` (ignorado) e `.env.example`.
+- Não commitar segredos; usar `.env` (ignorado) e `.env.example`. Nenhuma senha em `appsettings`; a connection string vem de `ConnectionStrings__Postgres` (env var ou user-secrets).
 
 ## Entrega
 
