@@ -10,7 +10,6 @@ import { Account, StatementEntry } from '../app/core/models/account.model';
 
 registerLocaleData(localePt);
 
-/** Providers comuns dos testes de componente: HTTP simulado, rotas vazias, pt-BR e sem animações. */
 export function provideTestEnvironment(): (Provider | EnvironmentProviders)[] {
   return [
     provideHttpClient(),
@@ -38,7 +37,6 @@ export function entry(partial: Partial<StatementEntry> & Pick<StatementEntry, 'e
   };
 }
 
-/** Texto visível do elemento, com espaços (inclusive o não separável do BRL) normalizados. */
 export function textOf(element: HTMLElement): string {
   return (element.textContent ?? '').replace(/\s+/g, ' ').trim();
 }

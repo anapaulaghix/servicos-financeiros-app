@@ -17,6 +17,16 @@
   font-family: var(--font-sans);
 }
 
+// Campo inválido (classe aplicada pela DynamicValidatorMessageDirective no host do controle):
+// cobre input nativo, componentes que contêm um input (inputnumber, datepicker) e o select.
+.field-invalid.p-inputtext,
+.field-invalid .p-inputtext,
+.field-invalid.p-select,
+.field-invalid .p-select {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .p-message {
   border-width: 2px;
 }
