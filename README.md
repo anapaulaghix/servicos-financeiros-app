@@ -149,10 +149,46 @@ O índice composto sustenta o extrato paginado de uma conta, do lançamento mais
 - [.NET SDK 10](https://dotnet.microsoft.com/download) para rodar/testar o backend fora do Docker (o `global.json` fixa a versão).
 - Node.js 20+ e npm para o frontend.
 
-### Com Docker Compose
+### 1. Crie o seu `.env`
+
+As credenciais não ficam no repositório: cada pessoa cria o próprio `.env` a partir do modelo, na raiz do projeto. O `.env` está no `.gitignore` e nunca deve ser commitado.
 
 ```bash
-cp .env.example .env      # defina as senhas em POSTGRES_PASSWORD e REDIS_PASSWORD
+cp .env.example .env
+```
+
+Depois, abra o `.env` e troque os valores de exemplo:
+
+| Variável | Obrigatória | Para que serve |
+|---|---|---|
+| `POSTGRES_USER` | Sim | Usuário do PostgreSQL |
+| `POSTGRES_PASSWORD` | Sim | Senha do PostgreSQL |
+| `POSTGRES_DB` | Não (padrão `servicos_financeiros`) | Nome do banco |
+| `REDIS_PASSWORD` | Sim | Senha do Redis, usado pelo rate limiting |
+| `SEED_DEMO_DATA` | Não (padrão `true`) | Cria 3 contas de demonstração na primeira subida |
+| `COMPOSE_PROFILES` e `ELASTICSEARCH_URL` | Não | Ligam o Elasticsearch e o Kibana (ver abaixo) |
+
+Se uma variável obrigatória faltar, o `docker compose up` não sobe e informa qual é. Nas senhas, evite `;`, `,` e `"`, porque elas entram em connection strings. Para gerar uma senha aleatória:
+
+```bash
+openssl rand -hex 16
+```
+
+No PowerShell, sem OpenSSL:
+
+```powershell
+-join ((48..57) + (65..90) + (97..122) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+```
+
+As senhas só são lidas **na primeira criação** dos volumes. Se você trocar `POSTGRES_PASSWORD` depois que o banco já existe, recrie-o (isso apaga os dados locais):
+
+```bash
+docker compose down -v
+```
+
+### 2. Suba a aplicação
+
+```bash
 docker compose up --build
 ```
 
