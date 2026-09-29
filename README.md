@@ -5,6 +5,8 @@ Motor de um serviço financeiro que recebe eventos de crédito e débito e mant�
 - **`backend/`** — API REST em C# / ASP.NET Core (.NET 10, LTS), PostgreSQL via EF Core.
 - **`frontend/servicos-financeiros/`** — aplicação web em Angular 19 com PrimeNG.
 
+Cada projeto tem um README próprio com a estrutura de pastas e como rodá-lo isoladamente: [backend](backend/README.md) e [frontend](frontend/servicos-financeiros/README.md).
+
 > **Status:** solução completa de ponta a ponta. O backend processa eventos com idempotência, consistência e transacionalidade (testado contra PostgreSQL real), expõe contas e extrato paginado, e o frontend permite listar contas, ver o extrato e lançar créditos e débitos. Tudo sobe com `docker compose up`. Veja a [seção de status](#status-e-próximos-passos) para o que ficou de fora.
 
 ## Stack
@@ -232,13 +234,7 @@ O `web` é o Angular compilado e servido pelo nginx (sem root), que também enca
 - A API roda no container com usuário sem privilégios (não é root), e nenhuma senha está no código nem nos `appsettings`.
 - O Redis exige senha (`REDIS_PASSWORD`) e não tem porta publicada.
 - No Elasticsearch/Kibana a segurança está **desligada**, por ser um ambiente local de demonstração, e as portas ficam restritas a `127.0.0.1`. Em produção: TLS, usuários e API keys.
-- A connection string chega à API pela variável `ConnectionStrings__Postgres`. Para rodar a API fora do Docker, use *user secrets*:
-
-```bash
-dotnet user-secrets set "ConnectionStrings:Postgres" "Host=localhost;Database=servicos_financeiros;Username=app_user;Password=<sua-senha>" \
-  --project backend/src/ServicosFinanceiros.Api
-dotnet run --project backend/src/ServicosFinanceiros.Api   # com Database__MigrateOnStartup=true para aplicar as migrations
-```
+- A connection string chega à API pela variável `ConnectionStrings__Postgres`. Para rodar a API fora do Docker (ex.: depurar pela IDE), ela vem de *user secrets*, que ficam fora do repositório; o passo a passo está no [README do backend](backend/README.md#opção-2-api-local-banco-no-docker).
 
 ### Migrations
 
@@ -376,13 +372,52 @@ Validei que os testes detectam os problemas de verdade: removendo o `FOR UPDATE`
 
 ## Decisões e trade-offs
 
-- **Bloqueio pessimista (`FOR UPDATE`) em vez de concorrência otimista.** Numa conta com muitos eventos simultâneos, o otimista geraria conflitos e retentativas; o pessimista simplesmente enfileira. O custo é a contenção na mesma conta, aceitável porque contas distintas não se bloqueiam.
-- **Idempotência pela chave primária.** Simples e à prova de corrida, ao custo de acoplar o `eventId` à tabela de lançamentos. Se um mesmo `eventId` pudesse valer em várias contas, seria preciso uma chave composta.
-- **`Account.Apply` devolve o lançamento em vez de o domínio conhecer o repositório.** Mantém o domínio puro; a checagem de duplicidade, que depende do histórico armazenado, fica na Application.
-- **Exceções de domínio para regras violadas.** Deixam o fluxo feliz limpo e são traduzidas em um só lugar. Em caminhos de altíssimo volume, um `Result<T>` evitaria o custo de exceções.
-- **Processamento síncrono.** O evento é processado dentro da requisição. Uma fila (RabbitMQ) desacoplaria a entrada do processamento, mas introduziria consistência eventual na tela; fica como evolução possível (ver abaixo).
-- **Rate limiting fail-open.** Priorizei a disponibilidade dos lançamentos sobre a proteção contra abuso quando o Redis cai. Num cenário com risco alto de abuso, o inverso (fail-closed) seria defensável.
-- **Elasticsearch opcional.** Fica num profile do Compose para o `docker compose up` padrão continuar leve; a API funciona igual com ou sem ele.
+Cada decisão abaixo tem um custo. Registro o que ganhei, o que paguei e quando eu mudaria de ideia.
+
+### Arquitetura e organização
+
+- **Clean Architecture num domínio pequeno.** Ganho: regras testáveis sem banco, dependências com direção garantida pelo compilador e troca de infraestrutura sem tocar no domínio. Custo: mais projetos, arquivos e indireção (interfaces com uma implementação só) do que um CRUD exigiria. Justifica-se porque o teste avalia exatamente separação de responsabilidades e porque as regras financeiras são o coração do sistema.
+- **Monorepo.** Front, back e infra versionados juntos: um `docker compose up` sobe tudo e cada commit representa um estado coerente. Custo: pipelines e deploys independentes por aplicação ficariam mais trabalhosos se os times crescessem separados.
+- **Controllers em vez de Minimal API.** Mais estrutura e convenção conhecida, em troca de um pouco mais de cerimônia (ver [a seção dedicada](#por-que-controllers-e-não-minimal-api)).
+- **Lado de leitura separado (`IAccountQueries`).** Consultas projetam direto para DTOs, sem carregar o agregado; é um CQRS leve. Custo: dois caminhos de acesso a dados para manter coerentes.
+
+### Consistência e dados
+
+- **Bloqueio pessimista (`FOR UPDATE`) em vez de concorrência otimista.** Numa conta com muitos eventos simultâneos, o otimista geraria conflitos e retentativas; o pessimista enfileira. Custo: contenção na mesma conta (eventos dela viram sequenciais) e transações que seguram a linha pelo tempo do processamento. Aceitável porque contas distintas não se bloqueiam.
+- **Saldo materializado na tabela `accounts`.** Ler o saldo é uma consulta simples, sem somar o histórico. Custo: o saldo e o histórico precisam andar juntos, o que é garantido pela transação única e pelos `CHECK`s; uma alteração manual no banco poderia fazê-los divergir, e não há rotina de reconciliação (`balance` = soma dos lançamentos) rodando periodicamente.
+- **Idempotência pela chave primária.** Simples e à prova de corrida. Custos: o `eventId` é único **globalmente** (se pudesse repetir entre contas, a chave seria composta) e a "memória" de idempotência nunca expira, porque é a própria tabela de lançamentos. Em volume muito alto, uma chave com prazo (ex.: no Redis) economizaria espaço, mas deixaria de proteger reenvios tardios.
+- **Ordem do extrato pelo processamento, não pela ocorrência.** `balance_after` reflete a ordem em que o saldo realmente mudou, então a cadeia de saldos é sempre coerente. Custo: um evento com `occurredAt` antigo que chega tarde aparece no topo do extrato; o `occurredAt` é informativo e nada é recalculado retroativamente.
+- **Paginação por offset (`page`/`pageSize`).** Permite ir direto a uma página e mostrar o total. Custos: páginas muito profundas ficam mais lentas, cada requisição faz um `COUNT`, e se um lançamento novo entrar enquanto o usuário pagina, os itens "descem" e um pode se repetir na página seguinte. Paginação por cursor (keyset) resolveria, ao custo de não saltar para uma página qualquer.
+- **Valores em `decimal`/`numeric(18,2)`, moeda única.** Não há campo de moeda: o sistema assume reais. Multimoeda exigiria moeda por conta e regras de conversão.
+- **Datas em UTC (`timestamptz`).** O servidor grava e compara em UTC; a conversão para o fuso do usuário é só na tela.
+
+### API e processamento
+
+- **Processamento síncrono.** O cliente recebe o resultado final (201, 409, 422) na mesma requisição. Custo: picos de carga chegam direto ao banco. Uma fila desacoplaria entrada e processamento, ao preço de consistência eventual (ver [Melhorias futuras](#mensageria-rabbitmq)).
+- **Exceções de domínio para regras violadas.** Fluxo feliz limpo e tradução para HTTP em um lugar só. Em caminhos de altíssimo volume, um `Result<T>` evitaria o custo de lançar exceções.
+- **Sem autenticação.** Qualquer cliente que alcance a API pode lançar. O rate limiting por IP mitiga abuso, mas não substitui identidade (ver Keycloak em melhorias futuras).
+- **Migrations na subida da API.** Prático para o Compose; em produção, com várias instâncias, isso deveria ser uma etapa separada do deploy.
+- **Contas vêm do seed.** Não há endpoint de criação de contas, porque o enunciado foca em movimentação e saldo.
+
+### Proteção e operação
+
+- **Rate limiting fail-open.** Priorizei a disponibilidade dos lançamentos sobre a proteção contra abuso quando o Redis cai. Num cenário com risco alto de abuso, fail-closed seria defensável.
+- **Janela fixa.** Simples e barata (um contador por cliente). Custo: na virada da janela, um cliente pode fazer até o dobro do limite em poucos segundos. Janela deslizante ou *token bucket* seriam mais precisos.
+- **Limite por IP.** Sem autenticação, é a identidade disponível. Custo: usuários atrás do mesmo NAT (ex.: uma empresa) dividem o mesmo limite.
+- **Redis sem persistência.** Contadores de janela curta não precisam sobreviver a um reinício; reiniciar o Redis só "zera" as janelas em andamento.
+- **Elasticsearch opcional e sem segurança local.** Fica num profile para o `docker compose up` padrão continuar leve; a segurança está desligada por ser ambiente de demonstração (portas só em `127.0.0.1`).
+- **O que vai para os logs.** Lançamentos registram `EventId`, `AccountId`, tipo, valor e saldo, o que é útil para auditoria. O nome do titular não é logado. Em produção, dados financeiros em log pedem política de retenção e controle de acesso ao Elasticsearch.
+- **Testes de integração com containers reais.** Detectam problemas que mocks não pegam (lock, transação, chave única, script Lua), ao custo de exigir Docker e rodar mais devagar que testes em memória.
+
+### Frontend
+
+- **Sem gerência de estado global.** Cada tela busca os próprios dados; depois de um lançamento, as contas são recarregadas da API. Custo: requisições repetidas entre telas. Com mais telas compartilhando dados, um store (NgRx) passaria a valer.
+- **Chave de idempotência só em memória.** O `IdempotencyKeyTracker` protege o reenvio enquanto a tela está aberta. Se a rede cair e o usuário **recarregar a página** antes de reenviar, a chave se perde e um novo envio recebe outra chave; se a primeira tentativa tinha chegado ao servidor, o lançamento seria feito duas vezes. Guardar a tentativa pendente no `sessionStorage` fecharia essa brecha.
+- **Prévia de saldo pode estar desatualizada.** Ela usa o saldo carregado na tela; outro lançamento feito em paralelo não aparece até recarregar. Por isso a prévia só orienta e o servidor decide.
+- **PrimeNG.** Componentes prontos e acessíveis, ao custo de um bundle inicial maior (~490 kB, ~120 kB comprimido) do que componentes próprios.
+- **Proxy de `/api` no nginx.** Elimina CORS e URLs por ambiente, mas acopla o front à topologia de deploy (a API precisa estar atrás do mesmo host).
+- **Fontes do Google Fonts.** Dependência externa em tempo de execução e motivo de não haver Content-Security-Policy; hospedar as fontes localmente permitiria fechar a CSP.
+- **Sem SSR.** Removi o SSR do `ng new`: um painel sem SEO não se beneficia dele, e ele acrescentaria um servidor Node ao Docker.
 
 ## Status e próximos passos
 
