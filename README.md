@@ -3,9 +3,9 @@
 Motor de um serviço financeiro que recebe eventos de crédito e débito e mantém o saldo consolidado de contas bancárias. Monorepo com:
 
 - **`backend/`** — API REST em C# / ASP.NET Core (.NET 10, LTS), PostgreSQL via EF Core.
-- **`frontend/servicos-financeiros/`** — aplicação web em Angular 19.
+- **`frontend/servicos-financeiros/`** — aplicação web em Angular 19 com PrimeNG.
 
-> **Status:** o backend está funcional e testado contra PostgreSQL real: domínio, caso de uso, migrations, o endpoint `POST /api/transactions` e o Docker Compose (banco + API). Ainda **não** estão prontos os endpoints de leitura (contas e extrato) e o frontend Angular. Veja a [seção de status](#status-e-próximos-passos).
+> **Status:** solução completa de ponta a ponta. O backend processa eventos com idempotência, consistência e transacionalidade (testado contra PostgreSQL real), expõe contas e extrato paginado, e o frontend permite listar contas, ver o extrato e lançar créditos e débitos. Tudo sobe com `docker compose up`. Veja a [seção de status](#status-e-próximos-passos) para o que ficou de fora.
 
 ## Stack
 
@@ -13,8 +13,10 @@ Motor de um serviço financeiro que recebe eventos de crédito e débito e mant�
 |---|---|
 | API | ASP.NET Core (.NET 10, LTS), Controllers, Swagger/OpenAPI (Swashbuckle) |
 | Persistência | PostgreSQL, Entity Framework Core 10 (Npgsql) |
-| Testes (backend) | xUnit, Moq, FluentAssertions |
-| Web | Angular 19, TypeScript |
+| Testes (backend) | xUnit, Moq, FluentAssertions, Testcontainers |
+| Web | Angular 19, TypeScript (strict), RxJS, PrimeNG 19, SCSS |
+| Testes (web) | Jasmine + Karma |
+| Infra | Docker Compose: PostgreSQL, API (.NET) e nginx servindo o Angular |
 
 ## Arquitetura
 
@@ -97,7 +99,18 @@ Evento de entrada (`POST /api/transactions`):
 
 **Valores monetários** usam `decimal` (nunca `double`), com `numeric(18,2)` no banco e limite de 2 casas decimais validado no domínio.
 
-### Contrato de resposta
+### Endpoints
+
+| Método e rota | Descrição |
+|---|---|
+| `POST /api/transactions` | Processa um evento de crédito ou débito. |
+| `GET /api/accounts` | Lista as contas com o saldo atual consolidado. |
+| `GET /api/accounts/{id}` | Consulta uma conta. |
+| `GET /api/accounts/{id}/transactions?page=1&pageSize=10` | Extrato paginado (`pageSize` de 1 a 100), do mais recente para o mais antigo. Cada linha traz `signedAmount` e `balanceAfter`, que evidenciam o impacto no saldo. |
+
+O lado de leitura usa uma porta própria (`IAccountQueries`) com projeções `AsNoTracking`, sem passar pelo agregado: consultas não precisam das regras de escrita. O extrato é ordenado pela **data de processamento**, que é a ordem em que o saldo realmente mudou; assim a cadeia de `balanceAfter` fica coerente mesmo quando um evento com `occurredAt` antigo chega tarde.
+
+### Contrato de resposta (`POST /api/transactions`)
 
 | Status | Situação |
 |---|---|
@@ -121,7 +134,7 @@ created_at    timestamptz        amount        numeric(18,2)  CHECK > 0
 CHECK balance >= 0               balance_after numeric(18,2)  CHECK >= 0
                                  occurred_at   timestamptz
                                  processed_at  timestamptz
-                                 INDEX (account_id, occurred_at DESC)
+                                 INDEX (account_id, processed_at DESC)
 ```
 
 O índice composto sustenta o extrato paginado de uma conta, do lançamento mais recente para o mais antigo.
@@ -153,7 +166,15 @@ curl -X POST http://localhost:8080/api/transactions \
 
 Repetir o mesmo `eventId` devolve `409`; um débito acima do saldo devolve `422`.
 
-O serviço web (Angular) será adicionado ao compose junto com o frontend.
+Depois de subir:
+
+| Serviço | Endereço |
+|---|---|
+| Aplicação web | http://localhost:4200 |
+| API + Swagger | http://localhost:8080/swagger |
+| PostgreSQL | `127.0.0.1:5432` (usuário e senha do `.env`) |
+
+O `web` é o Angular compilado e servido pelo nginx (sem root), que também encaminha `/api` para a API. Assim o navegador fala com um único host: sem CORS e sem URL de API por ambiente.
 
 ### Segredos e configuração
 
@@ -193,9 +214,35 @@ Os **testes de integração** usam [Testcontainers](https://testcontainers.com/)
 ```bash
 cd frontend/servicos-financeiros
 npm install
-npm start     # http://localhost:4200
-npm test
+npm start          # http://localhost:4200, com proxy de /api para localhost:8080 (proxy.conf.json)
+npm run test:ci    # Jasmine + Karma em Chrome headless (precisa do Chrome instalado)
 ```
+
+Para desenvolver, deixe a API no ar (`docker compose up -d db api`) e rode `npm start`.
+
+## Frontend
+
+### Organização
+
+```
+src/app/
+  core/       modelos tipados, serviços de API, tradução de erros, estado de carga, utilitários
+  features/   accounts (lista), statement (extrato), new-transaction (formulário)
+  shared/     page-header, loading, error-panel, pipe de valor com sinal
+  theme/      preset do PrimeNG e traduções pt-BR
+```
+
+Componentes standalone, `OnPush`, rotas com *lazy loading* e `withComponentInputBinding` (parâmetros de rota chegam como `input()`). Removi o SSR que o `ng new` gera: é um painel sem SEO, e o SSR só acrescentaria um servidor Node ao Docker.
+
+### Decisões
+
+- **PrimeNG como biblioteca de componentes** (tabela paginada, select, seletor de tipo, campo monetário, calendário, mensagens), tematizada por um preset próprio (`theme/app-preset.ts`) e tokens em `styles/_tokens.scss`. A identidade visual é modernista: grade rígida, tipografia grande, traços firmes, cantos retos e um único acento. Para adaptar a outra marca, basta trocar esses dois arquivos.
+- **RxJS + operador `toLoadState`.** Toda carga vira um fluxo `loading → ready | error`, então cada tela trata os três estados da mesma forma e uma falha nunca quebra o fluxo. O "tentar novamente" apenas emite de novo.
+- **Erros da API traduzidos em um lugar.** `toApiError` converte HTTP/`ProblemDetails` em um `ApiError` com `kind` (`network`, `validation`, `duplicate`, `insufficient-funds`, `not-found`, `server`). Os componentes só conhecem o `kind`, nunca códigos HTTP.
+- **Idempotência refletida na interface.** O `eventId` é gerado no formulário e só muda depois de um lançamento bem-sucedido. Se a rede falhar, a tela mantém o mesmo identificador e avisa que reenviar é seguro; se o servidor responder duplicado, explica que nada foi lançado de novo. `crypto.randomUUID` tem *fallback*, porque só existe em contextos seguros.
+- **O backend continua sendo a fonte da verdade.** O formulário valida (obrigatórios, valor maior que zero, no máximo 2 casas, UUID) e mostra uma prévia do saldo, inclusive um aviso quando o débito excede o saldo, mas **não bloqueia** o envio: quem recusa é o servidor. Os saldos exibidos são recarregados da API depois de cada lançamento.
+- **Extrato sem piscar.** A tabela mantém a página anterior enquanto a próxima carrega, em vez de sumir e reaparecer.
+- **Mobile.** A barra lateral vira cabeçalho; no extrato ficam só data, valor e saldo, porque o sinal e a cor já indicam crédito ou débito.
 
 ## Testes
 
@@ -206,7 +253,15 @@ Os testes de backend priorizam os cenários críticos do problema, não cobertur
 
 - **Integração (`ProcessTransactionIntegrationTests`, PostgreSQL real via Testcontainers)**: crédito grava lançamento e saldo juntos; o mesmo evento enviado duas vezes conta uma única vez; débito acima do saldo não deixa rastro; **10 eventos idênticos em paralelo processam exatamente 1**; **10 débitos concorrentes de 20 numa conta de 100 permitem só 5 e o saldo nunca fica negativo**; o saldo final é igual à soma do histórico após atividade concorrente; e uma falha ao gravar desfaz a atualização do saldo (atomicidade).
 
+- **Consultas (`AccountQueriesIntegrationTests`)**: listagem com saldo atual, extrato do mais recente para o mais antigo com o impacto no saldo, paginação sem repetir nem pular itens, página além do fim e conta inexistente.
+
 Validei que os testes de concorrência detectam o problema de verdade: removendo o `FOR UPDATE` do repositório, dois deles falham.
+
+**Testes do frontend (48):**
+
+- **Tradução de erros e serviços de API**: cada status HTTP vira o `kind` certo, o contrato do `POST`, os parâmetros de paginação e a propagação de erros.
+- **Formulário de lançamento**: validações (vazio, valor zero, mais de 2 casas, UUID inválido), prévia de saldo e aviso de débito acima do saldo, envio com o contrato da API, novo `eventId` após o sucesso, bloqueio de envio duplo e as respostas 409, 422, falha de comunicação (mantém o `eventId`) e 400 com erro no campo.
+- **Telas de dados**: estados de carregamento, vazio e erro com "tentar novamente"; renderização das contas e do extrato com valores e sinais; troca de página pedindo a página certa à API; e a tabela mantida visível durante a troca.
 
 ## Decisões e trade-offs
 
@@ -227,5 +282,9 @@ Validei que os testes de concorrência detectam o problema de verdade: removendo
 | `POST /api/transactions` + Swagger + `ProblemDetails` | Feito |
 | Docker Compose (PostgreSQL + API) com migrations e seed na subida | Feito |
 | Testes de integração com PostgreSQL (Testcontainers) | Feito |
-| Endpoints de leitura: listar contas, extrato paginado | Pendente |
-| Frontend Angular (contas, extrato, formulário) e serviço `web` no compose | Pendente (apenas o projeto gerado) |
+| Endpoints de leitura: listar contas, extrato paginado | Feito, com testes de integração |
+| Frontend Angular: contas, extrato paginado e formulário de lançamento | Feito, com 48 testes |
+| Serviço `web` (nginx + Angular) no Compose | Feito |
+| Criação de contas pela API/tela | Não feito (as contas de demonstração vêm do seed) |
+| Autenticação (Keycloak), mensageria (RabbitMQ), cache (Redis), observabilidade | Não feito (diferenciais opcionais) |
+| Testes end-to-end (navegador automatizado) | Não feito |

@@ -13,8 +13,10 @@ O enunciado original (PDF) não é versionado.
   - `src/ServicosFinanceiros.Api` — controllers, Swagger, tradução de exceções em ProblemDetails; composition root (`Program.cs`)
   - `tests/ServicosFinanceiros.UnitTests` — xUnit, Moq, FluentAssertions
   - `tests/ServicosFinanceiros.IntegrationTests` — xUnit + Testcontainers (PostgreSQL real; exige Docker rodando)
-- `frontend/servicos-financeiros/` — Angular 19 (componentes, serviços, RxJS, Angular Material)
-- `docker-compose.yml` (raiz) — postgres + api (o serviço web entra junto com o frontend)
+- `frontend/servicos-financeiros/` — Angular 19 + PrimeNG (standalone, OnPush, RxJS, sem SSR)
+  - `src/app/core` — modelos, serviços de API, `toApiError`, `toLoadState`; `features/` — telas; `shared/` — blocos reutilizáveis
+  - `src/app/theme/app-preset.ts` e `src/styles/_tokens.scss` — identidade visual (modernista); trocar a marca é mexer só neles
+- `docker-compose.yml` (raiz) — postgres + api + web (nginx servindo o Angular e fazendo proxy de `/api`)
 - `.env` (não versionado) guarda as credenciais; `.env.example` é o modelo
 
 Dependências entre camadas: Api → Application/Infrastructure; Infrastructure → Application → Domain.
@@ -39,8 +41,8 @@ dotnet ef migrations add <Nome> -p src/ServicosFinanceiros.Infrastructure -s src
 
 # Frontend (em frontend/servicos-financeiros)
 npm install
-npm start          # ng serve
-npm test           # ng test
+npm start          # ng serve com proxy de /api para localhost:8080 (a API precisa estar no ar)
+npm run test:ci    # Jasmine + Karma, Chrome headless
 ```
 
 ## Regras de negócio (inegociáveis)
@@ -58,7 +60,8 @@ Valores monetários usam `decimal` (nunca `double`/`float`). Concorrência na me
 
 - Código e identificadores em inglês nos nomes técnicos; mensagens ao usuário em português.
 - C#: nullable habilitado, injeção de dependência por construtor, sem lógica de negócio em controllers.
-- TypeScript: modelos tipados, `strict`, sem `any`; consumo da API via serviços com RxJS.
+- TypeScript: modelos tipados, `strict`, sem `any`; consumo da API via serviços com RxJS. A UI usa PrimeNG; a chamada à API é sempre relativa (`/api`), nunca uma URL absoluta.
+- Frontend: erros da API são traduzidos por `toApiError`; cargas de dados usam `toLoadState`. O `eventId` do formulário só muda após sucesso (idempotência).
 - Erros da API seguem `ProblemDetails`; o front trata loading, erro de comunicação e erros de validação.
 - Testes priorizam cenários críticos: saldo insuficiente, duplicidade, concorrência (back); validações de formulário, estados de tela e serviços (front).
 - Commits pequenos, mensagens no padrão Conventional Commits (`feat:`, `fix:`, `test:`, `chore:`), em português.
