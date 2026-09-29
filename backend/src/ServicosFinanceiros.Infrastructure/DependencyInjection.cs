@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ServicosFinanceiros.Application.Abstractions;
+using ServicosFinanceiros.Application.Accounts;
 using ServicosFinanceiros.Infrastructure.Persistence;
 using ServicosFinanceiros.Infrastructure.Persistence.Repositories;
 
@@ -23,6 +24,7 @@ public static class DependencyInjection
         services.AddScoped<IAccountRepository, AccountRepository>();
         services.AddScoped<ITransactionRepository, TransactionRepository>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
+        services.AddScoped<IAccountQueries, AccountQueries>();
         services.AddSingleton(TimeProvider.System);
 
         return services;

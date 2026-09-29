@@ -30,8 +30,9 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
             .HasForeignKey(t => t.AccountId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // Sustenta o extrato paginado: lançamentos de uma conta, do mais recente para o mais antigo.
-        builder.HasIndex(t => new { t.AccountId, t.OccurredAt })
+        // Sustenta o extrato paginado: lançamentos de uma conta, do mais recente para o mais antigo,
+        // na ordem de processamento (a ordem em que o saldo realmente mudou).
+        builder.HasIndex(t => new { t.AccountId, t.ProcessedAt })
             .IsDescending(false, true);
 
         builder.Ignore(t => t.SignedAmount);
