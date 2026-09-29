@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using ServicosFinanceiros.Application.Abstractions;
 using ServicosFinanceiros.Domain.Accounts;
 using ServicosFinanceiros.Domain.Exceptions;
@@ -10,17 +11,20 @@ public sealed class ProcessTransactionHandler : IProcessTransactionHandler
     private readonly ITransactionRepository _transactions;
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger<ProcessTransactionHandler> _logger;
 
     public ProcessTransactionHandler(
         IAccountRepository accounts,
         ITransactionRepository transactions,
         IUnitOfWork unitOfWork,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ILogger<ProcessTransactionHandler> logger)
     {
         _accounts = accounts;
         _transactions = transactions;
         _unitOfWork = unitOfWork;
         _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     public async Task<Transaction> HandleAsync(
@@ -29,9 +33,16 @@ public sealed class ProcessTransactionHandler : IProcessTransactionHandler
     {
         try
         {
-            return await _unitOfWork.ExecuteInTransactionAsync(
+            var transaction = await _unitOfWork.ExecuteInTransactionAsync(
                 ct => ProcessAsync(command, ct),
                 cancellationToken);
+
+            // Registrado só depois do commit: o log nunca afirma um lançamento que não foi gravado.
+            _logger.LogInformation(
+                "Lançamento {EventId} processado: {TransactionType:l} de {Amount} na conta {AccountId}; saldo após {BalanceAfter}",
+                transaction.EventId, transaction.Type, transaction.Amount, transaction.AccountId, transaction.BalanceAfter);
+
+            return transaction;
         }
         catch (UniqueConstraintViolationException)
         {

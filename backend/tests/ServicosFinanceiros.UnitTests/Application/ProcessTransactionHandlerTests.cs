@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using ServicosFinanceiros.Application.Abstractions;
@@ -30,7 +31,8 @@ public class ProcessTransactionHandlerTests
             _accounts.Object,
             _transactions.Object,
             _unitOfWork.Object,
-            new FakeTimeProvider(Now));
+            new FakeTimeProvider(Now),
+            NullLogger<ProcessTransactionHandler>.Instance);
     }
 
     private Account GivenAccountWithBalance(decimal balance)

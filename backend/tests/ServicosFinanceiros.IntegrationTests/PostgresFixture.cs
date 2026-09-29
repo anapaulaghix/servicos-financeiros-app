@@ -19,6 +19,8 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public ServiceProvider Services { get; private set; } = null!;
 
+    public string ConnectionString => _container.GetConnectionString();
+
     public async Task InitializeAsync()
     {
         await _container.StartAsync();
@@ -26,11 +28,12 @@ public sealed class PostgresFixture : IAsyncLifetime
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [$"ConnectionStrings:{Infrastructure.DependencyInjection.ConnectionStringName}"] = _container.GetConnectionString()
+                [$"ConnectionStrings:{Infrastructure.DependencyInjection.ConnectionStringName}"] = ConnectionString
             })
             .Build();
 
         Services = new ServiceCollection()
+            .AddLogging()
             .AddSingleton<IConfiguration>(configuration)
             .AddApplication()
             .AddInfrastructure(configuration)
@@ -74,8 +77,9 @@ public sealed class PostgresFixture : IAsyncLifetime
     }
 }
 
+/// <summary>Containers compartilhados por todos os testes de integração (sobem uma vez por execução).</summary>
 [CollectionDefinition(Name)]
-public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>
+public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>, ICollectionFixture<RedisFixture>
 {
     public const string Name = "postgres";
 }

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using ServicosFinanceiros.Api.Contracts;
+using ServicosFinanceiros.Api.RateLimiting;
 using ServicosFinanceiros.Application.Transactions;
 
 namespace ServicosFinanceiros.Api.Controllers;
@@ -22,8 +23,11 @@ public sealed class TransactionsController : ControllerBase
     /// <response code="404">Conta não encontrada.</response>
     /// <response code="409">Evento já processado (eventId duplicado).</response>
     /// <response code="422">Saldo insuficiente para o débito.</response>
+    /// <response code="429">Limite de requisições excedido; aguarde o tempo do cabeçalho Retry-After.</response>
     [HttpPost]
+    [RateLimit(RateLimitPolicyOptions.Transactions)]
     [ProducesResponseType<TransactionResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]

@@ -1,11 +1,16 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.HttpOverrides;
 using ServicosFinanceiros.Api.ExceptionHandling;
+using ServicosFinanceiros.Api.Observability;
+using ServicosFinanceiros.Api.RateLimiting;
 using ServicosFinanceiros.Application;
 using ServicosFinanceiros.Infrastructure;
 using ServicosFinanceiros.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddStructuredLogging();
 
 // Composição de dependências: cada camada expõe seu próprio registro.
 builder.Services
@@ -21,6 +26,24 @@ builder.Services
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<DomainExceptionHandler>();
 
+builder.Services
+    .AddOptions<RateLimitPolicyOptions>(RateLimitPolicyOptions.Transactions)
+    .Bind(builder.Configuration.GetSection($"{RateLimitPolicyOptions.SectionName}:{RateLimitPolicyOptions.Transactions}"))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// A API fica atrás do nginx: o IP do cliente chega em X-Forwarded-For. Só redes privadas (a rede
+// do Docker) são confiáveis como proxy, para ninguém forjar o próprio IP de fora e burlar o limite.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+    options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("10.0.0.0/8"));
+    options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("172.16.0.0/12"));
+    options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("192.168.0.0/16"));
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -33,6 +56,8 @@ if (app.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
         seedDemoData: app.Configuration.GetValue<bool>("Database:SeedOnStartup"));
 }
 
+app.UseForwardedHeaders();
+app.UseStructuredRequestLogging();
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger:Enabled"))
@@ -41,8 +66,14 @@ if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger
     app.UseSwaggerUI();
 }
 
+app.UseRouting();
+app.UseMiddleware<RateLimitingMiddleware>();
 app.UseAuthorization();
 
+app.MapHealthEndpoints();
 app.MapControllers();
 
 app.Run();
+
+/// <summary>Exposto para os testes de integração da API (WebApplicationFactory).</summary>
+public partial class Program;

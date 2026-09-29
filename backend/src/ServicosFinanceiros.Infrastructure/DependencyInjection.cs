@@ -3,16 +3,26 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ServicosFinanceiros.Application.Abstractions;
 using ServicosFinanceiros.Application.Accounts;
+using ServicosFinanceiros.Infrastructure.HealthChecks;
 using ServicosFinanceiros.Infrastructure.Persistence;
 using ServicosFinanceiros.Infrastructure.Persistence.Repositories;
+using ServicosFinanceiros.Infrastructure.RateLimiting;
+using StackExchange.Redis;
 
 namespace ServicosFinanceiros.Infrastructure;
 
 public static class DependencyInjection
 {
     public const string ConnectionStringName = "Postgres";
+    public const string RedisConnectionStringName = "Redis";
 
-    /// <summary>Registra persistência (EF Core/PostgreSQL) e as implementações das portas da aplicação.</summary>
+    /// <summary>Tag dos health checks que decidem se a instância pode receber tráfego (readiness).</summary>
+    public const string ReadinessTag = "ready";
+
+    /// <summary>
+    /// Registra persistência (EF Core/PostgreSQL), as implementações das portas da aplicação,
+    /// o rate limiting (Redis, opcional) e os health checks das dependências.
+    /// </summary>
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString(ConnectionStringName)
@@ -26,6 +36,27 @@ public static class DependencyInjection
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
         services.AddScoped<IAccountQueries, AccountQueries>();
         services.AddSingleton(TimeProvider.System);
+
+        var healthChecks = services.AddHealthChecks()
+            .AddDbContextCheck<AppDbContext>("postgres", tags: [ReadinessTag]);
+
+        var redisConnectionString = configuration.GetConnectionString(RedisConnectionStringName);
+        if (string.IsNullOrWhiteSpace(redisConnectionString))
+        {
+            services.AddSingleton<IRateLimiter, NoRateLimiter>();
+        }
+        else
+        {
+            services.AddSingleton<IConnectionMultiplexer>(_ =>
+            {
+                var options = ConfigurationOptions.Parse(redisConnectionString);
+                // Não derruba a API se o Redis estiver fora do ar na subida; reconecta sozinho depois.
+                options.AbortOnConnectFail = false;
+                return ConnectionMultiplexer.Connect(options);
+            });
+            services.AddSingleton<IRateLimiter, RedisRateLimiter>();
+            healthChecks.AddCheck<RedisHealthCheck>("redis", tags: [ReadinessTag]);
+        }
 
         return services;
     }

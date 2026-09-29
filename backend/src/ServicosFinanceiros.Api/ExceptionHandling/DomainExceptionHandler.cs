@@ -8,10 +8,12 @@ namespace ServicosFinanceiros.Api.ExceptionHandling;
 public sealed class DomainExceptionHandler : IExceptionHandler
 {
     private readonly IProblemDetailsService _problemDetailsService;
+    private readonly ILogger<DomainExceptionHandler> _logger;
 
-    public DomainExceptionHandler(IProblemDetailsService problemDetailsService)
+    public DomainExceptionHandler(IProblemDetailsService problemDetailsService, ILogger<DomainExceptionHandler> logger)
     {
         _problemDetailsService = problemDetailsService;
+        _logger = logger;
     }
 
     public async ValueTask<bool> TryHandleAsync(
@@ -30,6 +32,12 @@ public sealed class DomainExceptionHandler : IExceptionHandler
             InvalidTransactionException => (StatusCodes.Status400BadRequest, "Transação inválida"),
             _ => (StatusCodes.Status400BadRequest, "Requisição inválida")
         };
+
+        // Regra de negócio recusando uma operação é comportamento esperado, não falha do sistema:
+        // Information, com o tipo da recusa como propriedade para filtrar e contar no Elasticsearch.
+        _logger.LogInformation(
+            "Operação recusada ({Rejection:l}, HTTP {StatusCode}): {Reason:l}",
+            domainException.GetType().Name, status, domainException.Message);
 
         httpContext.Response.StatusCode = status;
 
