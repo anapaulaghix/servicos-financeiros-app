@@ -226,20 +226,43 @@ Para desenvolver, deixe a API no ar (`docker compose up -d db api`) e rode `npm 
 
 ```
 src/app/
-  core/       modelos tipados, serviços de API, tradução de erros, estado de carga, utilitários
-  features/   accounts (lista), statement (extrato), new-transaction (formulário)
-  shared/     page-header, loading, error-panel, pipe de valor com sinal
-  theme/      preset do PrimeNG e traduções pt-BR
+  app.component.ts   só o <router-outlet />
+  layout/            main-layout (estrutura das telas) e sidebar (navegação)
+  core/              modelos tipados, serviços de API, tradução de erros, estado de carga, utilitários
+  features/          accounts (lista), statement (extrato), new-transaction (formulário)
+  shared/            input-error (validação de formulários), page-header, loading, error-panel, pipes
+  theme/             preset do PrimeNG e traduções pt-BR
 ```
 
 Componentes standalone, `OnPush`, rotas com *lazy loading* e `withComponentInputBinding` (parâmetros de rota chegam como `input()`). Removi o SSR que o `ng new` gera: é um painel sem SEO, e o SSR só acrescentaria um servidor Node ao Docker.
+
+**`AppComponent` vazio.** A raiz só hospeda o roteador. O layout é um componente próprio (`MainLayoutComponent`), usado como rota pai das telas. Assim o layout pode variar por área (ex.: uma tela de login sem barra lateral seria só outra rota pai), é testável isoladamente e a raiz não acumula responsabilidades.
+
+### Validação de formulários (`shared/input-error`)
+
+As mensagens de validação são exibidas automaticamente: o componente importa a `DynamicValidatorMessageDirective` e **não escreve nenhum markup de erro no template**.
+
+```
+shared/input-error/
+  directive/   DynamicValidatorMessageDirective: ativa em todo formControlName/formControl/ngModel
+  pipe/        ErrorMessagePipe: chave do erro -> texto
+  service/     ErrorStateMatcherService: decide QUANDO o erro aparece (há a variante OnTouched)
+  validator/   VALIDATION_ERROR_MESSAGES (token com as mensagens) e CustomValidators (maxDecimals, uuid)
+  input-error.component.ts   renderiza as mensagens
+```
+
+- A diretiva escuta `control.events` (valor, status, touched, pristine) e os eventos de envio e reset do formulário. Quando o critério do `ErrorStateMatcher` é atendido, cria o `InputErrorComponent` logo após o campo e aplica a classe `field-invalid`.
+- **Mensagens centralizadas** num `InjectionToken`: um validador novo é uma linha no mapa, e dá para trocar os textos (ex.: outro idioma) sem tocar nos formulários.
+- **Critério de exibição injetável**: o padrão é "alterado ou enviado"; o formulário de lançamento usa `OnTouchedErrorStateMatcherService` (também ao sair do campo) só com um `provider`.
+- **Erros da API usam o mesmo caminho**: um 400 com erro por campo vira `setErrors({ server })` e aparece no campo certo.
+- `withoutFormValidation` desliga a diretiva num campo específico.
 
 ### Decisões
 
 - **PrimeNG como biblioteca de componentes** (tabela paginada, select, seletor de tipo, campo monetário, calendário, mensagens), tematizada por um preset próprio (`theme/app-preset.ts`) e tokens em `styles/_tokens.scss`. A identidade visual é modernista: grade rígida, tipografia grande, traços firmes, cantos retos e um único acento. Para adaptar a outra marca, basta trocar esses dois arquivos.
 - **RxJS + operador `toLoadState`.** Toda carga vira um fluxo `loading → ready | error`, então cada tela trata os três estados da mesma forma e uma falha nunca quebra o fluxo. O "tentar novamente" apenas emite de novo.
 - **Erros da API traduzidos em um lugar.** `toApiError` converte HTTP/`ProblemDetails` em um `ApiError` com `kind` (`network`, `validation`, `duplicate`, `insufficient-funds`, `not-found`, `server`). Os componentes só conhecem o `kind`, nunca códigos HTTP.
-- **Idempotência refletida na interface.** O `eventId` é gerado no formulário e só muda depois de um lançamento bem-sucedido. Se a rede falhar, a tela mantém o mesmo identificador e avisa que reenviar é seguro; se o servidor responder duplicado, explica que nada foi lançado de novo. `crypto.randomUUID` tem *fallback*, porque só existe em contextos seguros.
+- **Idempotência por baixo dos panos.** O `eventId` é detalhe técnico e não aparece na tela. O `IdempotencyKeyTracker` (`core/idempotency`) gera a chave no envio e a **reutiliza enquanto o usuário reenvia exatamente os mesmos dados de uma tentativa sem confirmação** (rede caiu, erro 5xx): se a primeira chegou ao servidor, a segunda é reconhecida como duplicada e nada é lançado duas vezes. Se o usuário altera algum dado, ou o servidor confirma (sucesso ou 409), a próxima operação recebe chave nova. Um 409 é mostrado como "Lançamento já registrado" e os saldos são recarregados. `crypto.randomUUID` tem *fallback*, porque só existe em contextos seguros.
 - **O backend continua sendo a fonte da verdade.** O formulário valida (obrigatórios, valor maior que zero, no máximo 2 casas, UUID) e mostra uma prévia do saldo, inclusive um aviso quando o débito excede o saldo, mas **não bloqueia** o envio: quem recusa é o servidor. Os saldos exibidos são recarregados da API depois de cada lançamento.
 - **Extrato sem piscar.** A tabela mantém a página anterior enquanto a próxima carrega, em vez de sumir e reaparecer.
 - **Mobile.** A barra lateral vira cabeçalho; no extrato ficam só data, valor e saldo, porque o sinal e a cor já indicam crédito ou débito.
@@ -257,10 +280,13 @@ Os testes de backend priorizam os cenários críticos do problema, não cobertur
 
 Validei que os testes de concorrência detectam o problema de verdade: removendo o `FOR UPDATE` do repositório, dois deles falham.
 
-**Testes do frontend (48):**
+**Testes do frontend (68):**
+
+- **Validação (`shared/input-error`)**: mensagens por validador, token substituível e mensagem genérica para validador sem texto; a diretiva não mostra erro em formulário recém-aberto, mostra ao alterar e ao enviar, troca e remove a mensagem, aplica as classes, respeita `withoutFormValidation`, limpa tudo no reset, exibe erros do servidor e funciona com o critério "ao sair do campo".
+- **Layout**: `AppComponent` só com o roteador, telas renderizadas dentro do layout e navegação com o item ativo.
 
 - **Tradução de erros e serviços de API**: cada status HTTP vira o `kind` certo, o contrato do `POST`, os parâmetros de paginação e a propagação de erros.
-- **Formulário de lançamento**: validações (vazio, valor zero, mais de 2 casas, UUID inválido), prévia de saldo e aviso de débito acima do saldo, envio com o contrato da API, novo `eventId` após o sucesso, bloqueio de envio duplo e as respostas 409, 422, falha de comunicação (mantém o `eventId`) e 400 com erro no campo.
+- **Formulário de lançamento**: validações exibidas sob cada campo (vazio, valor zero, mais de 2 casas), prévia de saldo e aviso de débito acima do saldo, envio com o contrato da API e `eventId` gerado internamente (sem aparecer na tela), limpeza após o sucesso sem acusar o campo vazio como erro, bloqueio de envio duplo e as respostas 409, 422, falha de comunicação (o reenvio dos mesmos dados usa o mesmo `eventId`; dados alterados usam outro) e 400 com erro no campo.
 - **Telas de dados**: estados de carregamento, vazio e erro com "tentar novamente"; renderização das contas e do extrato com valores e sinais; troca de página pedindo a página certa à API; e a tabela mantida visível durante a troca.
 
 ## Decisões e trade-offs
@@ -283,7 +309,7 @@ Validei que os testes de concorrência detectam o problema de verdade: removendo
 | Docker Compose (PostgreSQL + API) com migrations e seed na subida | Feito |
 | Testes de integração com PostgreSQL (Testcontainers) | Feito |
 | Endpoints de leitura: listar contas, extrato paginado | Feito, com testes de integração |
-| Frontend Angular: contas, extrato paginado e formulário de lançamento | Feito, com 48 testes |
+| Frontend Angular: contas, extrato paginado e formulário de lançamento | Feito, com 68 testes |
 | Serviço `web` (nginx + Angular) no Compose | Feito |
 | Criação de contas pela API/tela | Não feito (as contas de demonstração vêm do seed) |
 | Autenticação (Keycloak), mensageria (RabbitMQ), cache (Redis), observabilidade | Não feito (diferenciais opcionais) |
