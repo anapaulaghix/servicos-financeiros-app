@@ -9,6 +9,8 @@ Cada projeto tem um README próprio com a estrutura de pastas e como rodá-lo is
 
 > **Status:** solução completa de ponta a ponta. O backend processa eventos com idempotência, consistência e transacionalidade (testado contra PostgreSQL real), expõe contas e extrato paginado, e o frontend permite listar contas, ver o extrato e lançar créditos e débitos. Tudo sobe com `docker compose up`. Veja a [seção de status](#status-e-próximos-passos) para o que ficou de fora.
 
+> **Uso de IA:** o código foi escrito majoritariamente com um agente de IA (Claude Code); as decisões de arquitetura, escopo e produto foram minhas. Detalho o processo e quais decisões tomei em [Uso de IA no desenvolvimento](#uso-de-ia-no-desenvolvimento).
+
 ## Stack
 
 | Camada | Tecnologia |
@@ -418,6 +420,43 @@ Cada decisão abaixo tem um custo. Registro o que ganhei, o que paguei e quando 
 - **Proxy de `/api` no nginx.** Elimina CORS e URLs por ambiente, mas acopla o front à topologia de deploy (a API precisa estar atrás do mesmo host).
 - **Fontes do Google Fonts.** Dependência externa em tempo de execução e motivo de não haver Content-Security-Policy; hospedar as fontes localmente permitiria fechar a CSP.
 - **Sem SSR.** Removi o SSR do `ng new`: um painel sem SEO não se beneficia dele, e ele acrescentaria um servidor Node ao Docker.
+
+## Uso de IA no desenvolvimento
+
+Desenvolvi este projeto com o **Claude Code**, um agente de IA para programação. Quero deixar claro como foi a divisão de papéis, porque é o que eu gostaria de saber se estivesse avaliando.
+
+**A IA escreveu a maior parte do código, dos testes e desta documentação. As decisões foram minhas.** Eu defini o que construir, escolhi entre as alternativas, cortei escopo, revisei o resultado e pedi correções. Respondo por cada decisão registrada neste README e pelos trade-offs de cada uma.
+
+### Como trabalhei
+
+1. **Eu definia o objetivo ou a decisão**, a partir do enunciado e da minha experiência (ex.: "a validação de formulários deve seguir esta arquitetura de diretivas", "o `AppComponent` não deve ter nada").
+2. **O agente propunha a implementação** e, quando havia caminhos diferentes, apresentava as alternativas com os custos de cada uma.
+3. **Eu escolhia, ajustava ou recusava.** Algumas propostas eu recusei por estarem fora do escopo do teste (ver abaixo).
+4. **O agente implementava com testes** e verificava o resultado: build, testes automatizados, execução da stack no Docker e checagem das telas no navegador.
+5. **Eu revisava e pedia mudanças**, inclusive em código já pronto (ex.: trocar a biblioteca de componentes, esconder o identificador do evento).
+
+O [`CLAUDE.md`](CLAUDE.md) na raiz é o "contrato" que usei com o agente: regras de negócio inegociáveis, convenções e comandos do projeto. Também serve como documentação para quem for manter o código, com ou sem IA.
+
+### Decisões que tomei
+
+| Decisão | Por quê |
+|---|---|
+| **Um único repositório (monorepo)** | O enunciado pede um repositório e um `docker compose up` que suba tudo. Com dois repositórios, o Compose dependeria de clonar ambos na estrutura certa. |
+| **.NET 10 (LTS)** | Para um projeto novo, a versão LTS mais recente: suporte longo e sem migração próxima. |
+| **Controllers em vez de Minimal API** | Organização por recurso, contrato explícito no Swagger e convenção conhecida por times .NET (ver [a seção dedicada](#por-que-controllers-e-não-minimal-api)). |
+| **Clean Architecture com IoC por camada** | Cada camada registra as próprias dependências (`AddApplication()`, `AddInfrastructure()`) e o `Program.cs` só as compõe. Regras testáveis sem banco e dependências com direção garantida. |
+| **Banco e toda a stack no Docker, com credenciais em `.env`** | Ninguém precisa instalar PostgreSQL nem Redis. As senhas ficam num `.env` fora do repositório, o Compose recusa subir sem elas e os serviços internos não são expostos. |
+| **PrimeNG e identidade visual modernista** | Aparência de produto de uma empresa, não de um exemplo de biblioteca. Troquei o Angular Material pelo PrimeNG durante o desenvolvimento; como a camada de dados não dependia da biblioteca de UI, a troca afetou só as telas. |
+| **Validação de formulários por diretivas (`shared/input-error`)** | Arquitetura que eu já usava: o componente importa uma diretiva e as mensagens aparecem sozinhas, sem markup de erro nos templates. O agente adaptou ao projeto e corrigiu problemas da versão original (ver o [README do frontend](frontend/servicos-financeiros/README.md#validação-de-formulários-sharedinput-error)). |
+| **`AppComponent` vazio, layout como rota pai** | Deixar lógica e layout na raiz é má prática em projetos reais: dificulta áreas com layouts diferentes e testes isolados. |
+| **Identificador do evento escondido do usuário** | O `eventId` é detalhe técnico. A tela cuida da idempotência sozinha e o usuário só pensa em "lançamento". |
+| **Diferenciais: health checks, logs estruturados e rate limiting com Redis** | Os de melhor custo-benefício, que não mudam o comportamento do núcleo. Rate limiting (e não cache) porque cachear saldo contrariaria a regra de a tela refletir fielmente o backend. |
+| **Deixar NgRx, Keycloak e RabbitMQ como melhorias futuras** | Custo alto ou mudança de contrato (o RabbitMQ tornaria o lançamento assíncrono). Preferi entregar bem o núcleo e documentar o desenho. |
+| **Não implementar a confirmação de "lançamento repetido em 2 segundos"** | Cheguei a pedir essa funcionalidade e, depois de avaliar o impacto, desisti: não é idempotência (são eventos diferentes), fugiria do escopo e poderia quebrar integrações que enviam eventos legítimos iguais. |
+
+### Por que os commits não têm coautoria da IA
+
+Desliguei a linha `Co-Authored-By` automática nos commits para manter o histórico limpo. A autoria assistida está declarada aqui, de forma explícita, em vez de espalhada pelo histórico.
 
 ## Status e próximos passos
 
