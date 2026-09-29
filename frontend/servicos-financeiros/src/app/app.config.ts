@@ -15,7 +15,6 @@ registerLocaleData(localePt);
 export const appConfig: ApplicationConfig = {
   providers: [
     provideZoneChangeDetection({ eventCoalescing: true }),
-    // withComponentInputBinding: parâmetros de rota e query string chegam como inputs dos componentes.
     provideRouter(routes, withComponentInputBinding()),
     provideHttpClient(withFetch()),
     provideAnimationsAsync(),
