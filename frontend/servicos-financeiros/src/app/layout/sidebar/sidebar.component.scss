@@ -1,30 +1,13 @@
-.shell {
-  display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
-  min-height: 100vh;
-
-  &__sidebar {
-    position: sticky;
-    top: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 56px;
-    height: 100vh;
-    padding: 32px 28px;
-    background: var(--ink);
-    color: var(--paper);
-  }
-
-  &__main {
-    min-width: 0;
-    padding: 40px var(--gutter) 96px;
-  }
-
-  &__footnote {
-    margin-top: auto;
-    color: var(--rule-soft);
-    font-size: 11px;
-  }
+:host {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 56px;
+  height: 100vh;
+  padding: 32px 28px;
+  background: var(--ink);
+  color: var(--paper);
 }
 
 .brand {
@@ -80,25 +63,27 @@
   }
 }
 
+.footnote {
+  margin-top: auto;
+  color: var(--rule-soft);
+  font-size: 11px;
+}
+
 // Telas estreitas: a barra lateral vira um cabeçalho horizontal.
 @media (max-width: 900px) {
-  .shell {
-    grid-template-columns: 1fr;
+  :host {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px 32px;
+    height: auto;
+    padding: 16px var(--gutter);
+  }
 
-    &__sidebar {
-      position: static;
-      flex-direction: row;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px 32px;
-      height: auto;
-      padding: 16px var(--gutter);
-    }
-
-    &__footnote {
-      display: none;
-    }
+  .footnote {
+    display: none;
   }
 
   .nav {

@@ -1,0 +1,17 @@
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  min-height: 100vh;
+
+  &__main {
+    min-width: 0;
+    padding: 40px var(--gutter) 96px;
+  }
+}
+
+// Telas estreitas: a barra lateral vira um cabeçalho acima do conteúdo.
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+}
