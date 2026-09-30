@@ -79,7 +79,7 @@ Sem o passo 3, a API encerra na subida com `Connection string 'Postgres' não co
 
 | Comando | O que faz |
 |---|---|
-| `dotnet build` | Compila a solution |
+| `dotnet build` | Compila a solution (com os analisadores do .NET e as regras do `.editorconfig`) |
 | `dotnet test` | Todos os testes (os de integração exigem Docker rodando) |
 | `dotnet test tests/ServicosFinanceiros.UnitTests` | Só os unitários, sem Docker |
 | `dotnet tool restore` | Instala o `dotnet-ef` na versão fixada em `dotnet-tools.json` |
@@ -92,8 +92,10 @@ Os comandos acima são executados a partir da pasta `backend/`.
 backend/
 ├── ServicosFinanceiros.sln
 ├── global.json                  versão do SDK
+├── Directory.Build.props        configuração comum: nullable, analisadores, avisos como erro na CI
+├── .editorconfig                estilo e convenções de nomes verificados no build
 ├── dotnet-tools.json            dotnet-ef fixado
-├── Dockerfile / .dockerignore   imagem de produção (sdk → aspnet, sem root)
+├── Dockerfile / .dockerignore   imagem de produção (sdk → aspnet, sem root) e estágio de testes
 ├── src/
 │   ├── ServicosFinanceiros.Domain/          regras de negócio puras
 │   ├── ServicosFinanceiros.Application/     casos de uso e portas
@@ -129,6 +131,7 @@ O **Domain** não referencia nenhum outro projeto nem framework. A **Application
 |---|---|
 | `Transactions/ProcessTransactionHandler.cs` | Caso de uso de escrita. Dentro de uma transação: verifica duplicidade do `eventId`, carrega a conta **com bloqueio de linha**, chama `Account.Apply()` e registra o lançamento. Uma violação de chave única (dois eventos idênticos simultâneos) vira `DuplicateEventException`. Loga o lançamento só depois do commit. |
 | `Transactions/ProcessTransactionCommand.cs` | Dados de entrada do caso de uso. |
+| `Transactions/ITransactionQueries.cs` | Consulta de um lançamento pelo `eventId` (endereço do `Location` do 201). |
 | `Transactions/IProcessTransactionHandler.cs` | Contrato do caso de uso, usado pelo controller e pelos testes. |
 | `Abstractions/` | Portas implementadas pela Infrastructure: `IAccountRepository` (`GetByIdForUpdateAsync`), `ITransactionRepository`, `IUnitOfWork` (executa um trabalho numa transação) e `UniqueConstraintViolationException` (sinaliza violação de unicidade sem expor detalhes do banco). |
 | `Accounts/` | Lado de leitura: `IAccountQueries` (listar contas, consultar uma conta, extrato paginado) e os DTOs `AccountSummary`, `StatementEntry` e `PagedResult<T>`. |
@@ -142,6 +145,7 @@ O **Domain** não referencia nenhum outro projeto nem framework. A **Application
 | `Persistence/Configurations/` | Mapeamento EF Core: nomes de tabela e coluna em snake_case, `numeric(18,2)`, **chave primária em `event_id`** (idempotência), `CHECK`s (`balance >= 0`, `amount > 0`, `balance_after >= 0`), chave estrangeira e o índice `(account_id, processed_at DESC)` do extrato. |
 | `Persistence/Repositories/AccountRepository.cs` | Lê a conta com `SELECT ... FOR UPDATE`: a linha fica bloqueada até o fim da transação, então eventos da mesma conta são processados em fila. |
 | `Persistence/Repositories/TransactionRepository.cs` | Verifica se um `eventId` já existe e adiciona lançamentos. |
+| `Persistence/Repositories/TransactionQueries.cs` | Implementa `ITransactionQueries`. |
 | `Persistence/Repositories/AccountQueries.cs` | Implementa `IAccountQueries` com projeções `AsNoTracking` (sem carregar o agregado). O extrato é ordenado por data de processamento, com desempate pelo `event_id` para a paginação ser estável. |
 | `Persistence/EfUnitOfWork.cs` | Abre a transação, executa o caso de uso, faz um único `SaveChanges` e o commit. Traduz a violação de unicidade do PostgreSQL (`23505`) para `UniqueConstraintViolationException`. |
 | `Persistence/DatabaseInitializer.cs` | Aplica as migrations e, opcionalmente, cria 3 contas de demonstração com um crédito inicial registrado como lançamento. |
@@ -156,9 +160,10 @@ O **Domain** não referencia nenhum outro projeto nem framework. A **Application
 | Pasta / arquivo | Responsabilidade |
 |---|---|
 | `Program.cs` | Composition root: logs, `AddApplication()` + `AddInfrastructure()`, controllers, `ProblemDetails`, rate limiting, forwarded headers e Swagger. Define a ordem do pipeline HTTP. |
-| `Controllers/TransactionsController.cs` | `POST /api/transactions`: converte o contrato em comando e chama o caso de uso. Documenta as respostas 201, 400, 404, 409, 422 e 429 no Swagger. Tem `[RateLimit]`. |
+| `Controllers/TransactionsController.cs` | `POST /api/transactions` (responde 201 com `Location`) e `GET /api/transactions/{eventId}`. O `POST` converte o contrato em comando e chama o caso de uso. Documenta as respostas 201, 400, 404, 409, 422 e 429 no Swagger. Tem `[RateLimit]`. |
 | `Controllers/AccountsController.cs` | `GET /api/accounts`, `GET /api/accounts/{id}` e `GET /api/accounts/{id}/transactions?page&pageSize` (1 a 100 por página). |
-| `Contracts/` | `TransactionRequest` (contrato de entrada, com validações de formato) e `TransactionResponse`. O domínio nunca é exposto diretamente. |
+| `Contracts/` | `TransactionRequest` (contrato de entrada com campos anuláveis, para o `[Required]` detectar campo ausente, e conversão de `occurredAt` para UTC) e `TransactionResponse`. O domínio nunca é exposto diretamente. |
+| `ExceptionHandling/ValidationProblemFactory.cs` | Monta o 400 de payload inválido em português, com o campo em `errors` e sem expor mensagens internas do desserializador. |
 | `ExceptionHandling/DomainExceptionHandler.cs` | Traduz exceções de domínio em `ProblemDetails` num único lugar: duplicado → 409, saldo insuficiente → 422, conta inexistente → 404, dados inválidos → 400. Loga cada recusa. Por isso os controllers não têm `try/catch`. |
 | `Observability/StructuredLogging.cs` | Serilog: texto legível em desenvolvimento, JSON no container, envio opcional ao Elasticsearch e uma linha de log por requisição HTTP (health checks ficam de fora). |
 | `Observability/HealthCheckEndpoints.cs` | `/health/live` (só o processo) e `/health/ready` (PostgreSQL e Redis), com resposta em JSON. |
@@ -175,6 +180,7 @@ O **Domain** não referencia nenhum outro projeto nem framework. A **Application
 | `IntegrationTests/ProcessTransactionIntegrationTests.cs` | Idempotência, atomicidade e **concorrência** contra o banco real (ex.: 10 débitos simultâneos numa conta de 100 permitem só 5). |
 | `IntegrationTests/AccountQueriesIntegrationTests.cs` | Listagem, ordem do extrato, impacto no saldo e paginação sem repetir nem pular itens. |
 | `IntegrationTests/RedisRateLimiterIntegrationTests.cs` | Limite, janela, clientes independentes, atomicidade sob concorrência e *fail-open*. |
+| `IntegrationTests/TransactionsApiContractTests.cs` | Contrato HTTP do `POST /api/transactions`: 201 com `Location`, 409, 422, 404, 400 por campo, fuso horário, enum, corpo ausente e casos-limite. |
 | `IntegrationTests/ApiIntegrationTests.cs` | A API inteira em memória (`WebApplicationFactory`): health checks, 429 e IP do cliente vindo do proxy. |
 
 ## Caminho de uma requisição
@@ -201,6 +207,7 @@ O **Domain** não referencia nenhum outro projeto nem framework. A **Application
 | `Swagger:Enabled` | `false` | Liga o Swagger fora do ambiente Development. |
 | `RateLimiting:Transactions:PermitLimit` / `WindowSeconds` | `20` / `10` | Limite de lançamentos por cliente e janela. |
 | `Elasticsearch:Url` | vazio | Envia os logs ao Elasticsearch. Vazio = só console. |
+| `ReverseProxy:TrustedProxies` | vazio | IPs dos proxies autorizados a informar o IP do cliente (`X-Forwarded-For`). No Docker, o IP fixo do nginx. |
 | `Serilog:MinimumLevel` | `Information` | Nível mínimo de log, com overrides por namespace. |
 
 Qualquer chave pode vir por variável de ambiente trocando `:` por `__` (ex.: `RateLimiting__Transactions__PermitLimit=50`).
@@ -226,4 +233,4 @@ A própria Infrastructure é o projeto de *startup* do `dotnet ef` (pela `AppDbC
 dotnet test
 ```
 
-São 20 testes unitários e 25 de integração. Os de integração sobem containers de PostgreSQL e Redis, por isso **o Docker precisa estar rodando**. Eles priorizam os cenários críticos (concorrência, idempotência, atomicidade, rate limiting) em vez de cobertura percentual, e foram validados contra regressões: removendo o `FOR UPDATE` ou o middleware de rate limiting, os testes correspondentes falham.
+São 20 testes unitários e 41 de integração. Sem o .NET instalado, rode-os pelo Docker: `docker compose --profile test run --rm test-backend` (na raiz do repositório). Os de integração sobem containers de PostgreSQL e Redis, por isso **o Docker precisa estar rodando**. Eles priorizam os cenários críticos (concorrência, idempotência, atomicidade, rate limiting) em vez de cobertura percentual, e foram validados contra regressões: removendo o `FOR UPDATE` ou o middleware de rate limiting, os testes correspondentes falham.

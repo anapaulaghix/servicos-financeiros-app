@@ -33,7 +33,11 @@ docker compose up -d db redis api
 | `npm start` | Servidor de desenvolvimento com recarga automática e proxy para a API |
 | `npm run build` | Build de produção em `dist/servicos-financeiros/browser` |
 | `npm test` | Testes em modo observação (abre o Chrome) |
-| `npm run test:ci` | Testes uma vez, em Chrome headless (o que o CI usaria) |
+| `npm run test:ci` | Testes uma vez, em Chrome headless (o que a CI usa) |
+| `npm run lint` | ESLint (regras do Angular, sem `any`, `OnPush` obrigatório) |
+| `npm run format` / `format:check` | Prettier: formata / só verifica |
+
+Sem Node ou Chrome instalados, os testes rodam pelo Docker, na raiz do repositório: `docker compose --profile test run --rm test-frontend`.
 
 No Docker, o `Dockerfile` compila o app e o serve com **nginx sem root**; o `nginx.conf` faz o fallback de rotas do Angular e o proxy de `/api` para a API.
 
@@ -55,7 +59,10 @@ servicos-financeiros/
 │   ├── testing/                 utilitários compartilhados pelos testes
 │   ├── index.html
 │   └── main.ts
-├── Dockerfile / nginx.conf      imagem de produção (build Node → nginx)
+├── Dockerfile / nginx.conf      imagem de produção (build Node → nginx) e estágio de testes (Chromium)
+├── security-headers.conf        cabeçalhos de segurança incluídos em cada rota do nginx
+├── karma.conf.js                launcher ChromeHeadlessCI (sem sandbox) para CI e container
+├── eslint.config.js / .prettierrc.json   lint e formatação
 ├── proxy.conf.json              proxy de /api no ng serve
 └── angular.json / tsconfig*.json
 ```
@@ -293,7 +300,7 @@ Para aplicar outra marca, basta alterar dois arquivos: `styles/_tokens.scss` (va
 
 ## Testes
 
-Jasmine + Karma, 75 testes. Rodam em Chrome headless com `npm run test:ci`.
+Jasmine + Karma, 76 testes. Rodam em Chrome headless com `npm run test:ci`.
 
 | Arquivo | O que cobre |
 |---|---|

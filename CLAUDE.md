@@ -47,7 +47,13 @@ dotnet ef migrations add <Nome> -p src/ServicosFinanceiros.Infrastructure -s src
 # Frontend (em frontend/servicos-financeiros)
 npm install
 npm start          # ng serve com proxy de /api para localhost:8080 (a API precisa estar no ar)
-npm run test:ci    # Jasmine + Karma, Chrome headless
+npm run test:ci    # Jasmine + Karma, Chrome headless (ChromeHeadlessCI)
+npm run lint       # ESLint
+npm run format     # Prettier
+
+# Testes sem .NET/Node/Chrome na máquina (na raiz)
+docker compose --profile test run --rm test-backend
+docker compose --profile test run --rm test-frontend
 ```
 
 ## Regras de negócio (inegociáveis)
@@ -64,7 +70,7 @@ Valores monetários usam `decimal` (nunca `double`/`float`). Concorrência na me
 ## Convenções
 
 - Código e identificadores em inglês nos nomes técnicos; mensagens ao usuário em português.
-- C#: nullable habilitado, injeção de dependência por construtor, sem lógica de negócio em controllers.
+- C#: nullable habilitado, injeção de dependência por construtor (primary constructors), sem lógica de negócio em controllers. Analisadores do .NET e `.editorconfig` ligados; na CI, aviso é erro. Logs com `[LoggerMessage]`. Campos de contrato de entrada são anuláveis para o `[Required]` funcionar.
 - TypeScript: modelos tipados, `strict`, sem `any`; consumo da API via serviços com RxJS. A UI usa PrimeNG; a chamada à API é sempre relativa (`/api`), nunca uma URL absoluta.
 - Frontend: erros da API são traduzidos por `toApiError`; cargas de dados usam `toLoadState`. O `eventId` nunca é exibido ao usuário: o `IdempotencyKeyTracker` o gera no envio e o reutiliza só no reenvio dos mesmos dados sem confirmação.
 - Erros da API seguem `ProblemDetails`; o front trata loading, erro de comunicação e erros de validação.
