@@ -36,10 +36,10 @@ public sealed class Account
     public static Account Open(Guid id, string holderName, DateTimeOffset createdAt)
     {
         if (id == Guid.Empty)
-            throw new InvalidTransactionException("O identificador da conta é obrigatório.");
+            throw new InvalidAccountException("O identificador da conta é obrigatório.");
 
         if (string.IsNullOrWhiteSpace(holderName))
-            throw new InvalidTransactionException("O nome do titular é obrigatório.");
+            throw new InvalidAccountException("O nome do titular é obrigatório.");
 
         return new Account(id, holderName.Trim(), createdAt);
     }

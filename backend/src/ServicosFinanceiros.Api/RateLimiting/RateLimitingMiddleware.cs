@@ -12,8 +12,6 @@ namespace ServicosFinanceiros.Api.RateLimiting;
 /// </summary>
 public sealed partial class RateLimitingMiddleware(RequestDelegate next)
 {
-    private readonly RequestDelegate _next = next;
-
     public async Task InvokeAsync(
         HttpContext context,
         IRateLimiter rateLimiter,
@@ -24,7 +22,7 @@ public sealed partial class RateLimitingMiddleware(RequestDelegate next)
         var attribute = context.GetEndpoint()?.Metadata.GetMetadata<RateLimitAttribute>();
         if (attribute is null)
         {
-            await _next(context);
+            await next(context);
             return;
         }
 
@@ -39,7 +37,7 @@ public sealed partial class RateLimitingMiddleware(RequestDelegate next)
 
         if (decision.IsAllowed)
         {
-            await _next(context);
+            await next(context);
             return;
         }
 

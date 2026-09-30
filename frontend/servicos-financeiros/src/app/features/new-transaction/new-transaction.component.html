@@ -116,15 +116,25 @@
       } @else if (current.status === 'success') {
         <p-message severity="success" role="status">
           <div class="result">
-            <p class="result__title">Lançamento processado</p>
+            <p class="result__title">
+              {{ current.replayed ? 'Lançamento já registrado' : 'Lançamento processado' }}
+            </p>
             <p>
               {{ current.result.type === 'CREDIT' ? 'Crédito' : 'Débito' }} de
               <span class="num">{{ current.result.amount | currency: 'BRL' }}</span>
               em {{ current.holderName }}.
             </p>
-            <p>
-              Novo saldo: <strong class="num">{{ current.result.balanceAfter | currency: 'BRL' }}</strong>
-            </p>
+            @if (current.replayed) {
+              <p>Ele já tinha sido processado numa tentativa anterior; nada foi lançado de novo.</p>
+              <p>
+                Saldo após o lançamento:
+                <strong class="num">{{ current.result.balanceAfter | currency: 'BRL' }}</strong>
+              </p>
+            } @else {
+              <p>
+                Novo saldo: <strong class="num">{{ current.result.balanceAfter | currency: 'BRL' }}</strong>
+              </p>
+            }
             <a class="result__link" [routerLink]="['/contas', current.result.accountId]">Ver extrato →</a>
           </div>
         </p-message>

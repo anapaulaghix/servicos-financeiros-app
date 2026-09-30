@@ -6,15 +6,17 @@ namespace ServicosFinanceiros.Infrastructure.Persistence.Repositories;
 
 internal sealed class TransactionRepository(AppDbContext dbContext) : ITransactionRepository
 {
-    private readonly AppDbContext _dbContext = dbContext;
-
-    public Task<bool> ExistsAsync(Guid eventId, CancellationToken cancellationToken)
+    public Task<Transaction?> FindAsync(Guid eventId, CancellationToken cancellationToken)
     {
-        return _dbContext.Transactions.AnyAsync(t => t.EventId == eventId, cancellationToken);
+        // AsNoTracking: o valor vem sempre do banco. Uma consulta rastreada devolveria a instância já
+        // presente no contexto (ex.: o lançamento que acabou de falhar ao gravar), e não a confirmada.
+        return dbContext.Transactions
+            .AsNoTracking()
+            .SingleOrDefaultAsync(t => t.EventId == eventId, cancellationToken);
     }
 
     public void Add(Transaction transaction)
     {
-        _dbContext.Transactions.Add(transaction);
+        dbContext.Transactions.Add(transaction);
     }
 }

@@ -6,11 +6,9 @@ namespace ServicosFinanceiros.Infrastructure.Persistence.Repositories;
 
 internal sealed class AccountQueries(AppDbContext dbContext) : IAccountQueries
 {
-    private readonly AppDbContext _dbContext = dbContext;
-
     public async Task<IReadOnlyList<AccountSummary>> ListAsync(CancellationToken cancellationToken)
     {
-        return await _dbContext.Accounts
+        return await dbContext.Accounts
             .AsNoTracking()
             .OrderBy(a => a.HolderName)
             .Select(a => new AccountSummary(a.Id, a.HolderName, a.Balance, a.CreatedAt))
@@ -19,7 +17,7 @@ internal sealed class AccountQueries(AppDbContext dbContext) : IAccountQueries
 
     public Task<AccountSummary?> GetAsync(Guid accountId, CancellationToken cancellationToken)
     {
-        return _dbContext.Accounts
+        return dbContext.Accounts
             .AsNoTracking()
             .Where(a => a.Id == accountId)
             .Select(a => new AccountSummary(a.Id, a.HolderName, a.Balance, a.CreatedAt))
@@ -29,10 +27,10 @@ internal sealed class AccountQueries(AppDbContext dbContext) : IAccountQueries
     public async Task<PagedResult<StatementEntry>?> GetStatementAsync(
         Guid accountId, int page, int pageSize, CancellationToken cancellationToken)
     {
-        if (!await _dbContext.Accounts.AnyAsync(a => a.Id == accountId, cancellationToken))
+        if (!await dbContext.Accounts.AnyAsync(a => a.Id == accountId, cancellationToken))
             return null;
 
-        var entries = _dbContext.Transactions
+        var entries = dbContext.Transactions
             .AsNoTracking()
             .Where(t => t.AccountId == accountId);
 
@@ -44,8 +42,9 @@ internal sealed class AccountQueries(AppDbContext dbContext) : IAccountQueries
             return new PagedResult<StatementEntry>([], page, pageSize, total);
 
         var items = await entries
-            .OrderByDescending(t => t.ProcessedAt)
-            .ThenByDescending(t => t.EventId) // desempate estável para a paginação
+            // Pela sequência de gravação, e não por processed_at: com várias instâncias da API, relógios
+            // defasados (ou um ajuste de NTP) inverteriam a ordem e quebrariam a cadeia de balance_after.
+            .OrderByDescending(t => t.Sequence)
             .Skip((int)skip)
             .Take(pageSize)
             .Select(t => new StatementEntry(

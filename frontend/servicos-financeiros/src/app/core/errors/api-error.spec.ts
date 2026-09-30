@@ -12,7 +12,7 @@ describe('toApiError', () => {
     expect(error.message).toContain('comunicar com o servidor');
   });
 
-  it('classifica 409 como evento duplicado', () => {
+  it('classifica 409 (eventId reutilizado com outros dados) como duplicate', () => {
     expect(toApiError(http(409)).kind).toBe('duplicate');
   });
 

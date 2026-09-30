@@ -4,7 +4,11 @@ namespace ServicosFinanceiros.Application.Abstractions;
 
 public interface ITransactionRepository
 {
-    Task<bool> ExistsAsync(Guid eventId, CancellationToken cancellationToken);
+    /// <summary>
+    /// Lançamento já gravado com o <paramref name="eventId"/>, lido do banco (nunca de alterações
+    /// pendentes no contexto), ou null se não existir.
+    /// </summary>
+    Task<Transaction?> FindAsync(Guid eventId, CancellationToken cancellationToken);
 
     void Add(Transaction transaction);
 }

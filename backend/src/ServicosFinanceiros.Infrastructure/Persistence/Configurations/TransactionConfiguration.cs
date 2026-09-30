@@ -25,15 +25,20 @@ internal sealed class TransactionConfiguration : IEntityTypeConfiguration<Transa
         builder.Property(t => t.OccurredAt).HasColumnName("occurred_at").IsRequired();
         builder.Property(t => t.ProcessedAt).HasColumnName("processed_at").IsRequired();
 
+        // Identity (GENERATED ALWAYS): o valor vem de uma sequence do banco no INSERT e nunca do cliente.
+        // Com o cache padrão da sequence (1), os valores crescem na ordem em que os INSERTs acontecem.
+        builder.Property(t => t.Sequence).HasColumnName("sequence").UseIdentityAlwaysColumn();
+
         builder.HasOne<Account>()
             .WithMany()
             .HasForeignKey(t => t.AccountId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // Sustenta o extrato paginado: lançamentos de uma conta, do mais recente para o mais antigo,
-        // na ordem de processamento (a ordem em que o saldo realmente mudou).
-        builder.HasIndex(t => new { t.AccountId, t.ProcessedAt })
-            .IsDescending(false, true);
+        // Sustenta o extrato paginado: lançamentos de uma conta, do mais recente para o mais antigo, na
+        // ordem de gravação (a ordem em que o saldo realmente mudou). Único: a ordem nunca tem empates.
+        builder.HasIndex(t => new { t.AccountId, t.Sequence })
+            .IsDescending(false, true)
+            .IsUnique();
 
         builder.Ignore(t => t.SignedAmount);
     }

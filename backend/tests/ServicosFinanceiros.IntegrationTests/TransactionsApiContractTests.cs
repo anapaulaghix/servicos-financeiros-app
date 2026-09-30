@@ -16,7 +16,6 @@ namespace ServicosFinanceiros.IntegrationTests;
 [Collection(PostgresCollection.Name)]
 public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLifetime
 {
-    private readonly PostgresFixture _postgres = postgres;
     private WebApplicationFactory<Program> _api = null!;
     private HttpClient _client = null!;
 
@@ -26,7 +25,7 @@ public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLife
         _api = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
-            builder.UseSetting("ConnectionStrings:Postgres", _postgres.ConnectionString);
+            builder.UseSetting("ConnectionStrings:Postgres", postgres.ConnectionString);
         });
         _client = _api.CreateClient();
         return Task.CompletedTask;
@@ -52,7 +51,7 @@ public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLife
     [Fact]
     public async Task ValidEvent_Returns201WithBalanceAndLocationOfTheCreatedTransaction()
     {
-        var accountId = await _postgres.CreateAccountAsync(100m);
+        var accountId = await postgres.CreateAccountAsync(100m);
         var body = ValidEvent(accountId, amount: 25.5m);
 
         var response = await PostAsync(body);
@@ -69,22 +68,51 @@ public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLife
     }
 
     [Fact]
-    public async Task SameEventTwice_Returns409ProblemDetails()
+    public async Task SameEventTwice_Returns200WithTheOriginalTransactionAndDoesNotChargeAgain()
     {
-        var accountId = await _postgres.CreateAccountAsync(100m);
-        var body = ValidEvent(accountId);
+        // Retry de quem perdeu a resposta: recebe o resultado original em vez de um erro.
+        var accountId = await postgres.CreateAccountAsync(100m);
+        var body = ValidEvent(accountId, amount: 10m);
 
-        (await PostAsync(body)).StatusCode.Should().Be(HttpStatusCode.Created);
+        var first = await PostAsync(body);
+        first.StatusCode.Should().Be(HttpStatusCode.Created);
+        first.Headers.Contains("Idempotent-Replayed").Should().BeFalse();
+        var original = await JsonOf(first);
+
         var second = await PostAsync(body);
 
-        second.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        second.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        second.Headers.GetValues("Idempotent-Replayed").Should().ContainSingle().Which.Should().Be("true");
+        var replayed = await JsonOf(second);
+        replayed.GetProperty("eventId").GetGuid().Should().Be(original.GetProperty("eventId").GetGuid());
+        replayed.GetProperty("balanceAfter").GetDecimal().Should().Be(110m);
+        replayed.GetProperty("processedAt").GetDateTimeOffset()
+            .Should().Be(original.GetProperty("processedAt").GetDateTimeOffset());
+
+        var account = await JsonOf(await _client.GetAsync($"/api/accounts/{accountId}"));
+        account.GetProperty("balance").GetDecimal().Should().Be(110m);
+    }
+
+    [Fact]
+    public async Task SameEventIdWithDifferentData_Returns409ProblemDetails()
+    {
+        var accountId = await postgres.CreateAccountAsync(100m);
+        var body = ValidEvent(accountId, amount: 10m);
+        (await PostAsync(body)).StatusCode.Should().Be(HttpStatusCode.Created);
+
+        body["amount"] = 99m;
+        var reused = await PostAsync(body);
+
+        reused.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        reused.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        var account = await JsonOf(await _client.GetAsync($"/api/accounts/{accountId}"));
+        account.GetProperty("balance").GetDecimal().Should().Be(110m);
     }
 
     [Fact]
     public async Task DebitAboveBalance_Returns422()
     {
-        var accountId = await _postgres.CreateAccountAsync(10m);
+        var accountId = await postgres.CreateAccountAsync(10m);
 
         var response = await PostAsync(ValidEvent(accountId, "DEBIT", 10.01m));
 
@@ -104,7 +132,7 @@ public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLife
     public async Task OccurredAtWithTimeZoneOffset_IsAcceptedAndStoredAsTheSameInstantInUtc()
     {
         // ISO-8601 válido com fuso de Brasília: antes disso a API respondia 500 (o Npgsql só aceita offset zero).
-        var accountId = await _postgres.CreateAccountAsync(0m);
+        var accountId = await postgres.CreateAccountAsync(0m);
         var body = ValidEvent(accountId);
         body["occurredAt"] = "2026-01-30T10:15:00-03:00";
 
@@ -123,7 +151,7 @@ public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("occurredAt")]
     public async Task MissingField_Returns400ForThatField_WithoutTouchingTheAccount(string field)
     {
-        var accountId = await _postgres.CreateAccountAsync(100m);
+        var accountId = await postgres.CreateAccountAsync(100m);
         var body = ValidEvent(accountId);
         body.Remove(field);
 
@@ -133,7 +161,7 @@ public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLife
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         errors.EnumerateObject().Select(e => e.Name)
             .Should().Contain(name => string.Equals(name, field, StringComparison.OrdinalIgnoreCase));
-        (await _postgres.ReadAccountAsync(accountId)).Transactions.Should().HaveCount(1); // só o crédito inicial
+        (await postgres.ReadAccountAsync(accountId)).Transactions.Should().HaveCount(1); // só o crédito inicial
     }
 
     [Theory]
@@ -141,7 +169,7 @@ public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("SAQUE")]    // valor fora do enum
     public async Task InvalidType_Returns400InPortugueseWithoutExposingInternalTypeNames(object type)
     {
-        var accountId = await _postgres.CreateAccountAsync(100m);
+        var accountId = await postgres.CreateAccountAsync(100m);
         var body = ValidEvent(accountId);
         body["type"] = JsonValue.Create(type);
 
@@ -169,18 +197,18 @@ public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLife
     [Fact]
     public async Task CreditThatWouldOverflowTheMaximumBalance_Returns400InsteadOf500()
     {
-        var accountId = await _postgres.CreateAccountAsync(9_999_999_999_999_999m);
+        var accountId = await postgres.CreateAccountAsync(9_999_999_999_999_999m);
 
         var response = await PostAsync(ValidEvent(accountId, amount: 1m));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await _postgres.ReadAccountAsync(accountId)).Balance.Should().Be(9_999_999_999_999_999m);
+        (await postgres.ReadAccountAsync(accountId)).Balance.Should().Be(9_999_999_999_999_999m);
     }
 
     [Fact]
     public async Task StatementPageFarBeyondTheEnd_Returns200WithEmptyPage()
     {
-        var accountId = await _postgres.CreateAccountAsync(10m);
+        var accountId = await postgres.CreateAccountAsync(10m);
 
         var response = await _client.GetAsync($"/api/accounts/{accountId}/transactions?page={int.MaxValue}&pageSize=100");
 

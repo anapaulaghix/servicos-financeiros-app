@@ -12,56 +12,78 @@ public sealed partial class ProcessTransactionHandler(
     TimeProvider timeProvider,
     ILogger<ProcessTransactionHandler> logger) : IProcessTransactionHandler
 {
-    private readonly IAccountRepository _accounts = accounts;
-    private readonly ITransactionRepository _transactions = transactions;
-    private readonly IUnitOfWork _unitOfWork = unitOfWork;
-    private readonly TimeProvider _timeProvider = timeProvider;
-    private readonly ILogger<ProcessTransactionHandler> _logger = logger;
-
-    public async Task<Transaction> HandleAsync(
+    /// <summary>
+    /// Processa o evento uma única vez. Um reenvio com os mesmos dados devolve o lançamento original
+    /// (<see cref="ProcessTransactionResult.IsReplay"/>), para que quem perdeu a resposta receba o resultado;
+    /// o mesmo <c>eventId</c> com outros dados é recusado com <see cref="DuplicateEventException"/>.
+    /// </summary>
+    public async Task<ProcessTransactionResult> HandleAsync(
         ProcessTransactionCommand command,
         CancellationToken cancellationToken)
     {
+        // Caminho rápido para reenvios: responde sem abrir transação nem bloquear a conta.
+        var existing = await transactions.FindAsync(command.EventId, cancellationToken);
+        if (existing is not null)
+            return Replay(existing, command);
+
         try
         {
-            var transaction = await _unitOfWork.ExecuteInTransactionAsync(
+            var transaction = await unitOfWork.ExecuteInTransactionAsync(
                 ct => ProcessAsync(command, ct),
                 cancellationToken);
 
-            LogProcessed(_logger, transaction.EventId, transaction.Type, transaction.Amount, transaction.AccountId, transaction.BalanceAfter);
+            LogProcessed(logger, transaction.EventId, transaction.Type, transaction.Amount, transaction.AccountId, transaction.BalanceAfter);
 
-            return transaction;
+            return new ProcessTransactionResult(transaction, IsReplay: false);
         }
         catch (UniqueConstraintViolationException)
         {
-            // Rede de proteção da idempotência: dois eventos idênticos concorrentes passam
-            // pela checagem em ExistsAsync, mas só um consegue gravar (PK em eventId).
-            throw new DuplicateEventException(command.EventId);
+            // Rede de proteção da idempotência: requisições concorrentes com o mesmo eventId passam
+            // juntas pela consulta acima, mas só uma consegue gravar (PK em eventId). As demais leem
+            // o lançamento vencedor, já confirmado, e seguem a mesma regra de um reenvio comum.
+            var winner = await transactions.FindAsync(command.EventId, cancellationToken)
+                         ?? throw new DuplicateEventException(command.EventId);
+            return Replay(winner, command);
         }
     }
 
     private async Task<Transaction> ProcessAsync(ProcessTransactionCommand command, CancellationToken ct)
     {
-        if (await _transactions.ExistsAsync(command.EventId, ct))
-            throw new DuplicateEventException(command.EventId);
-
-        var account = await _accounts.GetByIdForUpdateAsync(command.AccountId, ct)
+        var account = await accounts.GetByIdForUpdateAsync(command.AccountId, ct)
                       ?? throw new AccountNotFoundException(command.AccountId);
 
         var transaction = account.Apply(
             command.EventId,
             command.Type,
             command.Amount,
-            command.OccurredAt,
-            _timeProvider.GetUtcNow());
+            ToStoredPrecision(command.OccurredAt),
+            ToStoredPrecision(timeProvider.GetUtcNow()));
 
-        _transactions.Add(transaction);
+        transactions.Add(transaction);
         return transaction;
     }
+
+    private ProcessTransactionResult Replay(Transaction existing, ProcessTransactionCommand command)
+    {
+        if (!existing.IsSameEvent(command.AccountId, command.Type, command.Amount, command.OccurredAt))
+            throw new DuplicateEventException(command.EventId);
+
+        LogReplayed(logger, existing.EventId, existing.AccountId);
+        return new ProcessTransactionResult(existing, IsReplay: true);
+    }
+
+    // O banco guarda datas em microssegundos; o DateTimeOffset tem ticks de 100 ns. Gerar o lançamento já
+    // nessa precisão faz a resposta do 201 ser idêntica ao que foi gravado e ao que um reenvio devolve.
+    private static DateTimeOffset ToStoredPrecision(DateTimeOffset value) =>
+        value.AddTicks(-(value.Ticks % TimeSpan.TicksPerMicrosecond));
 
     // Registrado só depois do commit: o log nunca afirma um lançamento que não foi gravado.
     [LoggerMessage(Level = LogLevel.Information,
         Message = "Lançamento {EventId} processado: {TransactionType} de {Amount} na conta {AccountId}; saldo após {BalanceAfter}")]
     private static partial void LogProcessed(
         ILogger logger, Guid eventId, TransactionType transactionType, decimal amount, Guid accountId, decimal balanceAfter);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Evento {EventId} reenviado com os mesmos dados; devolvido o lançamento original da conta {AccountId}, sem novo lançamento")]
+    private static partial void LogReplayed(ILogger logger, Guid eventId, Guid accountId);
 }

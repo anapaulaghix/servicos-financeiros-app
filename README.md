@@ -6,8 +6,8 @@
 
 - **O que é:** API em .NET 10 que processa créditos e débitos em contas e uma aplicação Angular para consultar saldos, ver o extrato e lançar valores.
 - **Como rodar:** `docker compose up --build` (sem configurar nada: sem `.env`, valem senhas padrão de desenvolvimento local). A aplicação abre em http://localhost:4200 e o Swagger em http://localhost:8080/swagger.
-- **Regras garantidas:** um evento nunca é processado duas vezes (chave primária no `eventId`), o saldo nunca fica negativo, lançamento e saldo são gravados na mesma transação e débitos simultâneos na mesma conta são enfileirados (`SELECT ... FOR UPDATE`). [Detalhes](#regras-de-negócio-e-onde-cada-uma-é-garantida).
-- **Testes:** 61 no backend (incluindo concorrência e o contrato HTTP contra PostgreSQL e Redis reais) e 76 no frontend, rodando na CI a cada push. Também rodam pelo Docker, sem instalar nada: `docker compose --profile test run --rm test-backend` e `... test-frontend`.
+- **Regras garantidas:** um evento nunca é processado duas vezes (chave primária no `eventId`; o reenvio devolve o lançamento original), o saldo nunca fica negativo, lançamento e saldo são gravados na mesma transação e débitos simultâneos na mesma conta são enfileirados (`SELECT ... FOR UPDATE`). [Detalhes](#regras-de-negócio-e-onde-cada-uma-é-garantida).
+- **Testes:** 73 no backend (incluindo concorrência e o contrato HTTP contra PostgreSQL e Redis reais) e 79 no frontend, rodando na CI a cada push. Também rodam pelo Docker, sem instalar nada: `docker compose --profile test run --rm test-backend` e `... test-frontend`.
 - **Diferenciais feitos:** health checks, logs estruturados (Serilog + Elasticsearch) e rate limiting com Redis. NgRx, Keycloak e RabbitMQ estão desenhados em [Melhorias futuras](#melhorias-futuras).
 - **Onde estão as decisões:** [Decisões e trade-offs](#decisões-e-trade-offs) e [Uso de IA no desenvolvimento](#uso-de-ia-no-desenvolvimento).
 
@@ -88,7 +88,7 @@ Todos os serviços são `Scoped` (uma instância por requisição), o que combin
 Escolhi **Controllers** (`[ApiController]`). Minimal APIs são uma boa opção, e no tamanho atual (um único endpoint) a diferença de desempenho é irrelevante. A decisão é sobre como o projeto cresce e quem vai mantê-lo:
 
 - **Organização por recurso.** O escopo pede transações, contas e extrato. Um controller por recurso mantém rotas, contratos e documentação agrupados; em Minimal API isso exige disciplina extra (grupos e extensões) para não virar um `Program.cs` inflado.
-- **Contrato declarativo.** `[ApiController]` devolve 400 com `ValidationProblemDetails` automaticamente quando o payload é inválido, e `[ProducesResponseType]` + comentários XML alimentam o Swagger com todos os códigos possíveis (201, 400, 404, 409, 422). O contrato fica visível no código e na documentação.
+- **Contrato declarativo.** `[ApiController]` devolve 400 com `ValidationProblemDetails` automaticamente quando o payload é inválido, e `[ProducesResponseType]` + comentários XML alimentam o Swagger com todos os códigos possíveis (201, 200, 400, 404, 409, 422). O contrato fica visível no código e na documentação.
 - **Convenção conhecida.** É o padrão mais comum em times .NET, o que reduz o custo de leitura e evolução por outras pessoas, um dos critérios do teste.
 - **Extensibilidade.** Filtros, model binding e validação por atributos já vêm prontos para quando entrarem autenticação, versionamento ou rate limiting.
 
@@ -110,7 +110,7 @@ Evento de entrada (`POST /api/transactions`):
 
 | Regra | Como é garantida |
 |---|---|
-| **Idempotência** | O `eventId` é a **chave primária** de `transactions`. O handler consulta antes (`ExistsAsync`) para responder rápido com 409 e, se duas requisições idênticas chegarem ao mesmo tempo, o banco rejeita a segunda (violação de unicidade), traduzida para o mesmo 409. A checagem prévia é otimização; a garantia real é a chave primária. |
+| **Idempotência** | O `eventId` é a **chave primária** de `transactions`. Um reenvio com os mesmos dados (conta, tipo, valor e data) **não é erro**: devolve `200` com o lançamento original e o cabeçalho `Idempotent-Replayed: true`, para que quem perdeu a resposta (timeout, rede) receba o resultado. O mesmo `eventId` com dados diferentes é recusado com `409`. O handler consulta o `eventId` antes de abrir a transação (caminho rápido); se requisições com o mesmo `eventId` chegarem ao mesmo tempo, o banco rejeita todas menos uma (violação de unicidade), e as demais leem o lançamento vencedor e seguem a mesma regra. A consulta prévia é otimização; a garantia real é a chave primária. |
 | **Consistência** | `Account.Apply` é o único caminho que altera o saldo e rejeita débitos acima dele. Como reforço, o banco tem `CHECK (balance >= 0)` e `CHECK (balance_after >= 0)`. Cada lançamento guarda `balance_after`, então o saldo pode ser reconstruído a partir do histórico. |
 | **Transacionalidade** | `EfUnitOfWork` abre uma transação, executa o caso de uso e faz um único `SaveChanges` seguido de commit: lançamento e saldo são gravados juntos ou nenhum é. |
 | **Concorrência na mesma conta** | A conta é lida com `SELECT ... FOR UPDATE`, bloqueio pessimista de linha que serializa eventos da mesma conta até o fim da transação. Sem isso, dois débitos simultâneos poderiam ler o mesmo saldo e ambos passar. |
@@ -128,7 +128,7 @@ Evento de entrada (`POST /api/transactions`):
 | `GET /api/accounts/{id}` | Consulta uma conta. |
 | `GET /api/accounts/{id}/transactions?page=1&pageSize=10` | Extrato paginado (`pageSize` de 1 a 100), do mais recente para o mais antigo. Cada linha traz `signedAmount` e `balanceAfter`, que evidenciam o impacto no saldo. |
 
-O lado de leitura usa uma porta própria (`IAccountQueries`) com projeções `AsNoTracking`, sem passar pelo agregado: consultas não precisam das regras de escrita. O extrato é ordenado pela **data de processamento**, que é a ordem em que o saldo realmente mudou; assim a cadeia de `balanceAfter` fica coerente mesmo quando um evento com `occurredAt` antigo chega tarde.
+O lado de leitura usa portas próprias (`IAccountQueries`, `ITransactionQueries`) com projeções `AsNoTracking` para modelos de leitura (`AccountSummary`, `StatementEntry`, `TransactionDetails`), sem carregar entidades de domínio: consultas não precisam das regras de escrita. Nas contas, o modelo de leitura é o próprio contrato HTTP; o lançamento tem um contrato na Api (`TransactionResponse`) porque o mesmo formato responde ao `POST` (a entidade recém-gravada) e ao `GET` (a projeção). O extrato é ordenado pela **ordem de gravação** (coluna `sequence`, atribuída pelo banco), que é a ordem em que o saldo realmente mudou; assim a cadeia de `balanceAfter` fica coerente mesmo quando um evento com `occurredAt` antigo chega tarde. Não uso `processed_at` para ordenar porque ele vem do relógio da instância da API que processou: com várias instâncias, relógios defasados (ou um ajuste de NTP) inverteriam a ordem.
 
 ### Contrato de resposta (`POST /api/transactions`)
 
@@ -137,7 +137,8 @@ O lado de leitura usa uma porta própria (`IAccountQueries`) com projeções `As
 | `201` | Evento processado; corpo traz o lançamento e o `balanceAfter`; `Location` aponta para o lançamento. |
 | `400` | Campo ausente, formato inválido (ex.: `type` que não seja `"CREDIT"`/`"DEBIT"`) ou valor fora do permitido. Mensagens em português, com o campo em `errors`. |
 | `404` | Conta não encontrada. |
-| `409` | `eventId` já processado. |
+| `200` | Reenvio de um evento já processado com os mesmos dados: devolve o lançamento original, com o cabeçalho `Idempotent-Replayed: true`. Nada é lançado de novo. |
+| `409` | O `eventId` já foi usado num lançamento com dados diferentes. |
 | `422` | Saldo insuficiente. |
 | `429` | Limite de requisições excedido (ver rate limiting). |
 
@@ -157,10 +158,11 @@ created_at    timestamptz        amount        numeric(18,2)  CHECK > 0
 CHECK balance >= 0               balance_after numeric(18,2)  CHECK >= 0
                                  occurred_at   timestamptz
                                  processed_at  timestamptz
-                                 INDEX (account_id, processed_at DESC)
+                                 sequence      bigint  IDENTITY (ordem de gravação)
+                                 UNIQUE INDEX (account_id, sequence DESC)
 ```
 
-O índice composto sustenta o extrato paginado de uma conta, do lançamento mais recente para o mais antigo.
+O índice composto sustenta o extrato paginado de uma conta, do lançamento mais recente para o mais antigo. A `sequence` é uma coluna identity (`GENERATED ALWAYS`): o banco a numera no `INSERT`. Como os lançamentos de uma conta são gravados em série (`FOR UPDATE` na conta), a numeração dentro da conta é exatamente a ordem em que o saldo mudou, sem empates.
 
 ## Como rodar
 
@@ -231,16 +233,17 @@ curl -X POST http://localhost:8080/api/transactions \
   -d '{"eventId":"'$(uuidgen)'","accountId":"11111111-1111-1111-1111-111111111111","type":"CREDIT","amount":150.75,"occurredAt":"2026-01-30T10:15:00Z"}'
 ```
 
-Repetir o mesmo `eventId` devolve `409`; um débito acima do saldo devolve `422`.
+Repetir o mesmo corpo devolve `200` com o lançamento original (sem lançar de novo); o mesmo `eventId` com outro valor devolve `409`; um débito acima do saldo devolve `422`.
 
 ### Como ver cada resposta
 
-Na tela, a idempotência é automática e o identificador do evento fica escondido, então o 409 só aparece se a rede cair depois de o servidor processar o lançamento. Para conferir cada caso, use o Swagger (http://localhost:8080/swagger) ou a tela:
+Na tela, a idempotência é automática e o identificador do evento fica escondido: o reenvio (200) só acontece se a rede cair depois de o servidor processar o lançamento, e a tela o mostra como "Lançamento já registrado"; o 409 não ocorre pela tela, porque dados alterados sempre ganham chave nova. Para conferir cada caso, use o Swagger (http://localhost:8080/swagger) ou a tela:
 
 | Resposta | Como provocar |
 |---|---|
 | `201` | Tela **Novo lançamento**, ou `POST` no Swagger com uma conta de demonstração (ex.: `11111111-1111-1111-1111-111111111111`). |
-| `409` duplicado | No Swagger, envie **duas vezes o mesmo corpo** (mesmo `eventId`). A segunda resposta é 409 e o saldo não muda. |
+| `200` reenvio | No Swagger, envie **duas vezes o mesmo corpo** (mesmo `eventId`). A segunda resposta é 200 com o lançamento original e o cabeçalho `Idempotent-Replayed: true`; o saldo não muda. |
+| `409` eventId reutilizado | No Swagger, reenvie o mesmo `eventId` mudando o `amount`. A resposta é 409 e o saldo não muda. |
 | `422` saldo insuficiente | Na tela, um débito maior que o saldo (a tela avisa antes, mas deixa enviar: quem decide é a API). |
 | `400` | No Swagger, remova um campo ou envie `"type": 2`. |
 | `404` | No Swagger, use um `accountId` que não existe. |
@@ -380,7 +383,7 @@ shared/input-error/
   directive/   DynamicValidatorMessageDirective: ativa em todo formControlName/formControl/ngModel
   pipe/        ErrorMessagePipe: chave do erro -> texto
   service/     ErrorStateMatcherService: decide QUANDO o erro aparece (há a variante OnTouched)
-  validator/   VALIDATION_ERROR_MESSAGES (token com as mensagens) e CustomValidators (maxDecimals, uuid)
+  validator/   VALIDATION_ERROR_MESSAGES (token com as mensagens) e CustomValidators (maxDecimals)
   input-error.component.ts   renderiza as mensagens
 ```
 
@@ -394,8 +397,8 @@ shared/input-error/
 
 - **PrimeNG como biblioteca de componentes** (tabela paginada, select, seletor de tipo, campo monetário, calendário, mensagens), tematizada por um preset próprio (`theme/app-preset.ts`) e tokens em `styles/_tokens.scss`. A identidade visual é modernista: grade rígida, tipografia grande, traços firmes, cantos retos e um único acento. Para adaptar a outra marca, basta trocar esses dois arquivos.
 - **RxJS + operador `toLoadState`.** Toda carga vira um fluxo `loading → ready | error`, então cada tela trata os três estados da mesma forma e uma falha nunca quebra o fluxo. O "tentar novamente" apenas emite de novo.
-- **Erros da API traduzidos em um lugar.** `toApiError` converte HTTP/`ProblemDetails` em um `ApiError` com `kind` (`network`, `validation`, `duplicate`, `insufficient-funds`, `not-found`, `server`). Os componentes só conhecem o `kind`, nunca códigos HTTP.
-- **Idempotência por baixo dos panos.** O `eventId` é detalhe técnico e não aparece na tela. O `IdempotencyKeyTracker` (`core/idempotency`) gera a chave no envio e a **reutiliza enquanto o usuário reenvia exatamente os mesmos dados de uma tentativa sem confirmação** (rede caiu, erro 5xx): se a primeira chegou ao servidor, a segunda é reconhecida como duplicada e nada é lançado duas vezes. Se o usuário altera algum dado, ou o servidor confirma (sucesso ou 409), a próxima operação recebe chave nova. Um 409 é mostrado como "Lançamento já registrado" e os saldos são recarregados. `crypto.randomUUID` tem *fallback*, porque só existe em contextos seguros.
+- **Erros da API traduzidos em um lugar.** `toApiError` converte HTTP/`ProblemDetails` em um `ApiError` com `kind` (`network`, `validation`, `duplicate`, `insufficient-funds`, `not-found`, `rate-limited`, `server`); os serviços o aplicam com o operador `mapApiError()`. Os componentes só conhecem o `kind`, nunca códigos HTTP.
+- **Idempotência por baixo dos panos.** O `eventId` é detalhe técnico e não aparece na tela. O `IdempotencyKeyTracker` (`core/idempotency`) gera a chave no envio e a **reutiliza enquanto o usuário reenvia exatamente os mesmos dados de uma tentativa sem confirmação** (rede caiu, erro 5xx): se a primeira chegou ao servidor, a API devolve o lançamento original (200 com `Idempotent-Replayed`), mostrado como "Lançamento já registrado" com o saldo após ele, e nada é lançado duas vezes. Se o usuário altera algum dado, ou o servidor responde de forma definitiva (sucesso, reenvio ou 409), a próxima operação recebe chave nova. `crypto.randomUUID` tem *fallback*, porque só existe em contextos seguros.
 - **O backend continua sendo a fonte da verdade.** O formulário valida (obrigatórios, valor maior que zero, no máximo 2 casas) e mostra uma prévia do saldo, inclusive um aviso quando o débito excede o saldo, mas **não bloqueia** o envio: quem recusa é o servidor. Os saldos exibidos são recarregados da API depois de cada lançamento.
 - **Extrato sem piscar.** A tabela mantém a página anterior enquanto a próxima carrega, em vez de sumir e reaparecer.
 - **Mobile.** A barra lateral vira cabeçalho; no extrato ficam só data, valor e saldo, porque o sinal e a cor já indicam crédito ou débito.
@@ -405,25 +408,27 @@ shared/input-error/
 Os testes de backend priorizam os cenários críticos do problema, não cobertura percentual:
 
 - **Domínio (`AccountTests`)**: crédito, débito, débito igual ao saldo, saldo insuficiente sem alterar o estado, valores não positivos e com mais de 2 casas, e o saldo final igual à soma dos lançamentos.
-- **Aplicação (`ProcessTransactionHandlerTests`)**: evento duplicado não altera a conta, violação de unicidade concorrente vira "duplicado", saldo insuficiente não persiste nada, conta inexistente e execução dentro do unit of work.
+- **Domínio (`TransactionTests`)**: quando um evento recebido é o mesmo lançamento (mesmo instante em outro fuso, valor em outra escala, diferença abaixo de 1 µs) e quando não é (qualquer campo diferente).
+- **Aplicação (`ProcessTransactionHandlerTests`)**: reenvio com os mesmos dados devolve o original sem tocar na conta, `eventId` com outros dados vira 409, violação de unicidade concorrente vira reenvio (mesmos dados) ou 409 (outros dados), saldo insuficiente não persiste nada, conta inexistente e execução dentro do unit of work.
 
-- **Integração (`ProcessTransactionIntegrationTests`, PostgreSQL real via Testcontainers)**: crédito grava lançamento e saldo juntos; o mesmo evento enviado duas vezes conta uma única vez; débito acima do saldo não deixa rastro; **10 eventos idênticos em paralelo processam exatamente 1**; **10 débitos concorrentes de 20 numa conta de 100 permitem só 5 e o saldo nunca fica negativo**; o saldo final é igual à soma do histórico após atividade concorrente; e uma falha ao gravar desfaz a atualização do saldo (atomicidade).
+- **Integração (`ProcessTransactionIntegrationTests`, PostgreSQL real via Testcontainers)**: crédito grava lançamento e saldo juntos; o mesmo evento enviado duas vezes conta uma única vez e o reenvio devolve o original; o mesmo `eventId` com outros dados é recusado; débito acima do saldo não deixa rastro; **10 eventos idênticos em paralelo gravam exatamente 1, e todos recebem o mesmo lançamento**; **10 débitos concorrentes de 20 numa conta de 100 permitem só 5 e o saldo nunca fica negativo**; o saldo final é igual à soma do histórico após atividade concorrente; e uma falha ao gravar desfaz a atualização do saldo (atomicidade).
 
-- **Consultas (`AccountQueriesIntegrationTests`)**: listagem com saldo atual, extrato do mais recente para o mais antigo com o impacto no saldo, paginação sem repetir nem pular itens, página além do fim e conta inexistente.
+- **Consultas (`AccountQueriesIntegrationTests`)**: listagem com saldo atual, extrato do mais recente para o mais antigo com o impacto no saldo, **a cadeia de `balanceAfter` fechando linha a linha depois de atividade concorrente**, **a ordem do extrato mantida mesmo com relógios de instâncias defasados**, paginação sem repetir nem pular itens, página além do fim e conta inexistente.
+- **Migrations (`MigrationsIntegrationTests`)**: a migration da coluna `sequence`, aplicada sobre um banco com histórico, numera os lançamentos existentes na ordem do extrato (e não na ordem física da tabela) e continua a numeração a partir do maior valor.
 
 - **Rate limiting (`RedisRateLimiterIntegrationTests`, Redis real)**: libera até o limite e bloqueia com `Retry-After`; cada cliente tem o próprio limite; a janela expira e libera; 50 requisições paralelas contra limite 10 liberam exatamente 10; Redis inacessível permite a requisição e deixa o readiness `Degraded`; sem Redis configurado, nada é limitado.
 - **API ponta a ponta (`ApiIntegrationTests`, `WebApplicationFactory` com PostgreSQL e Redis reais)**: liveness e readiness; 429 com `ProblemDetails`, `Retry-After` e `RateLimit-Remaining`; leituras sem limite; atrás do proxy confiável, o limite contado pelo IP em `X-Forwarded-For`; e, chamando direto, um `X-Forwarded-For` forjado é ignorado.
-- **Contrato HTTP (`TransactionsApiContractTests`)**: 201 com `Location`; 409; 422; 404; 400 para cada campo ausente sem tocar no banco; `occurredAt` com fuso `-03:00` armazenado em UTC; `type` numérico ou desconhecido recusado em português sem expor tipos internos; corpo ausente; crédito que estouraria o limite do banco; e página do extrato além do fim.
+- **Contrato HTTP (`TransactionsApiContractTests`)**: 201 com `Location`; reenvio com 200, `Idempotent-Replayed` e o mesmo lançamento, sem cobrar de novo; 409 para `eventId` reutilizado com outros dados; 422; 404; 400 para cada campo ausente sem tocar no banco; `occurredAt` com fuso `-03:00` armazenado em UTC; `type` numérico ou desconhecido recusado em português sem expor tipos internos; corpo ausente; crédito que estouraria o limite do banco; e página do extrato além do fim.
 
 Validei que os testes detectam os problemas de verdade: removendo o `FOR UPDATE` do repositório, dois testes de concorrência falham; desligando o middleware de rate limiting, os dois testes de 429 falham.
 
-**Testes do frontend (76):**
+**Testes do frontend (79):**
 
 - **Validação (`shared/input-error`)**: mensagens por validador, token substituível e mensagem genérica para validador sem texto; a diretiva não mostra erro em formulário recém-aberto, mostra ao alterar e ao enviar, troca e remove a mensagem, aplica as classes, respeita `withoutFormValidation`, limpa tudo no reset, exibe erros do servidor e funciona com o critério "ao sair do campo".
 - **Layout**: `AppComponent` só com o roteador, telas renderizadas dentro do layout e navegação com o item ativo.
 
 - **Tradução de erros e serviços de API**: cada status HTTP vira o `kind` certo, o contrato do `POST`, os parâmetros de paginação e a propagação de erros.
-- **Formulário de lançamento**: validações exibidas sob cada campo (vazio, valor zero, mais de 2 casas), prévia de saldo e aviso de débito acima do saldo, envio com o contrato da API e `eventId` gerado internamente (sem aparecer na tela), limpeza após o sucesso sem acusar o campo vazio como erro, bloqueio de envio duplo e as respostas 409, 422, falha de comunicação (o reenvio dos mesmos dados usa o mesmo `eventId`; dados alterados usam outro) e 400 com erro no campo.
+- **Formulário de lançamento**: validações exibidas sob cada campo (vazio, valor zero, mais de 2 casas), prévia de saldo e aviso de débito acima do saldo, envio com o contrato da API e `eventId` gerado internamente (sem aparecer na tela), limpeza após o sucesso sem acusar o campo vazio como erro, bloqueio de envio duplo, o reenvio confirmado pela API (200 com `Idempotent-Replayed`) e as respostas 409, 422, falha de comunicação (o reenvio dos mesmos dados usa o mesmo `eventId`; dados alterados usam outro) e 400 com erro no campo.
 - **Telas de dados**: estados de carregamento, vazio e erro com "tentar novamente"; renderização das contas e do extrato com valores e sinais; troca de página pedindo a página certa à API; e a tabela mantida visível durante a troca.
 
 ## Decisões e trade-offs
@@ -442,14 +447,14 @@ Cada decisão abaixo tem um custo. Registro o que ganhei, o que paguei e quando 
 - **Bloqueio pessimista (`FOR UPDATE`) em vez de concorrência otimista.** Numa conta com muitos eventos simultâneos, o otimista geraria conflitos e retentativas; o pessimista enfileira. Custo: contenção na mesma conta (eventos dela viram sequenciais) e transações que seguram a linha pelo tempo do processamento. Aceitável porque contas distintas não se bloqueiam.
 - **Saldo materializado na tabela `accounts`.** Ler o saldo é uma consulta simples, sem somar o histórico. Custo: o saldo e o histórico precisam andar juntos, o que é garantido pela transação única e pelos `CHECK`s; uma alteração manual no banco poderia fazê-los divergir, e não há rotina de reconciliação (`balance` = soma dos lançamentos) rodando periodicamente.
 - **Idempotência pela chave primária.** Simples e à prova de corrida. Custos: o `eventId` é único **globalmente** (se pudesse repetir entre contas, a chave seria composta) e a "memória" de idempotência nunca expira, porque é a própria tabela de lançamentos. Em volume muito alto, uma chave com prazo (ex.: no Redis) economizaria espaço, mas deixaria de proteger reenvios tardios.
-- **Ordem do extrato pelo processamento, não pela ocorrência.** `balance_after` reflete a ordem em que o saldo realmente mudou, então a cadeia de saldos é sempre coerente. Custo: um evento com `occurredAt` antigo que chega tarde aparece no topo do extrato; o `occurredAt` é informativo e nada é recalculado retroativamente.
+- **Ordem do extrato pela gravação, não pela ocorrência nem pelo relógio.** `balance_after` reflete a ordem em que o saldo realmente mudou, então a cadeia de saldos é sempre coerente. Essa ordem vem de uma coluna identity do banco (`sequence`), e não de `processed_at`, que depende do relógio de cada instância da API. Custos: um evento com `occurredAt` antigo que chega tarde aparece no topo do extrato (o `occurredAt` é informativo e nada é recalculado retroativamente); e a numeração depende de a sequence não ter cache por sessão (o padrão do PostgreSQL), o que está registrado no mapeamento.
 - **Paginação por offset (`page`/`pageSize`).** Permite ir direto a uma página e mostrar o total. Custos: páginas muito profundas ficam mais lentas, cada requisição faz um `COUNT`, e se um lançamento novo entrar enquanto o usuário pagina, os itens "descem" e um pode se repetir na página seguinte. Paginação por cursor (keyset) resolveria, ao custo de não saltar para uma página qualquer.
 - **Valores em `decimal`/`numeric(18,2)`, moeda única.** Não há campo de moeda: o sistema assume reais. Multimoeda exigiria moeda por conta e regras de conversão.
 - **Datas em UTC (`timestamptz`).** O servidor grava e compara em UTC; a conversão para o fuso do usuário é só na tela.
 
 ### API e processamento
 
-- **Processamento síncrono.** O cliente recebe o resultado final (201, 409, 422) na mesma requisição. Custo: picos de carga chegam direto ao banco. Uma fila desacoplaria entrada e processamento, ao preço de consistência eventual (ver [Melhorias futuras](#mensageria-rabbitmq)).
+- **Processamento síncrono.** O cliente recebe o resultado final (201, 200 no reenvio, 409, 422) na mesma requisição. Custo: picos de carga chegam direto ao banco. Uma fila desacoplaria entrada e processamento, ao preço de consistência eventual (ver [Melhorias futuras](#mensageria-rabbitmq)).
 - **Exceções de domínio para regras violadas.** Fluxo feliz limpo e tradução para HTTP em um lugar só. Em caminhos de altíssimo volume, um `Result<T>` evitaria o custo de lançar exceções.
 - **Sem autenticação.** Qualquer cliente que alcance a API pode lançar. O rate limiting por IP mitiga abuso, mas não substitui identidade (ver Keycloak em melhorias futuras).
 - **Migrations na subida da API.** Prático para o Compose; em produção, com várias instâncias, isso deveria ser uma etapa separada do deploy.
@@ -520,12 +525,12 @@ Desliguei a linha `Co-Authored-By` automática nos commits para manter o histór
 | Domínio (`Account`, `Transaction`, regras) | Feito, com testes |
 | Caso de uso `ProcessTransaction` (idempotência, unit of work) | Feito, com testes |
 | Persistência: `DbContext`, mapeamentos, repositórios, unit of work | Feito, com testes de integração |
-| Migrations do EF Core | Feito (`InitialCreate` e `StatementIndexByProcessedAt`) |
+| Migrations do EF Core | Feito (`InitialCreate`, `StatementIndexByProcessedAt` e `StatementOrderBySequence`) |
 | `POST /api/transactions` + Swagger + `ProblemDetails` | Feito |
 | Docker Compose (PostgreSQL + API) com migrations e seed na subida | Feito |
 | Testes de integração com PostgreSQL (Testcontainers) | Feito |
 | Endpoints de leitura: listar contas, extrato paginado | Feito, com testes de integração |
-| Frontend Angular: contas, extrato paginado e formulário de lançamento | Feito, com 76 testes |
+| Frontend Angular: contas, extrato paginado e formulário de lançamento | Feito, com 79 testes |
 | Serviço `web` (nginx + Angular) no Compose | Feito |
 | Health checks (liveness e readiness) | Feito, com testes (diferencial) |
 | Logs estruturados com Serilog e Elasticsearch | Feito (diferencial) |
@@ -558,6 +563,6 @@ Hoje, RxJS com o operador `toLoadState` e signals resolvem as três telas, que n
 1. A API valida o contrato, grava o evento como **pendente** e o publica na fila, na mesma transação (padrão **Outbox**, para não haver evento gravado sem mensagem nem mensagem sem evento). Responde **202 Accepted** com a URL de status.
 2. Um **consumidor** processa com as mesmas regras de hoje (idempotência pela PK, `FOR UPDATE`, transação), com fila de mensagens com erro (DLQ) e novas tentativas.
 3. **Ordem por conta:** particionar as mensagens por `accountId` (ex.: *consistent hash exchange*), para os eventos de uma mesma conta serem processados em sequência.
-4. **Front:** o estado "processando" passa a ser real; a tela consulta o status (ou recebe por SignalR) até o evento virar processado, recusado por saldo insuficiente ou duplicado.
+4. **Front:** o estado "processando" passa a ser real; a tela consulta o status (ou recebe por SignalR) até o evento virar processado ou ser recusado (saldo insuficiente, `eventId` reutilizado com outros dados).
 
 Ganho: absorver picos e desacoplar quem envia de quem processa. Custo: consistência eventual na tela e mais peças para operar.

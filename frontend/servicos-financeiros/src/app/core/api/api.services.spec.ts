@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 
 import { ApiError } from '../errors/api-error';
-import { TransactionRequest } from '../models/account.model';
+import { TransactionOutcome, TransactionRequest, TransactionResult } from '../models/account.model';
 import { AccountsApi } from './accounts-api.service';
 import { TransactionsApi } from './transactions-api.service';
 
@@ -62,16 +62,38 @@ describe('API services', () => {
       occurredAt: '2026-01-30T10:15:00.000Z',
     };
 
+    const created: TransactionResult = {
+      ...payload,
+      balanceAfter: 150.75,
+      processedAt: '2026-01-30T10:15:01Z',
+    };
+
     it('envia o evento em POST /api/transactions com o contrato da API', () => {
-      TestBed.inject(TransactionsApi).submit(payload).subscribe();
+      let outcome: TransactionOutcome | undefined;
+      TestBed.inject(TransactionsApi)
+        .submit(payload)
+        .subscribe((value) => (outcome = value));
 
       const request = http.expectOne('/api/transactions');
       expect(request.request.method).toBe('POST');
       expect(request.request.body).toEqual(payload);
-      request.flush({});
+      request.flush(created, { status: 201, statusText: 'Created' });
+
+      expect(outcome).toEqual({ transaction: created, replayed: false });
     });
 
-    it('propaga evento duplicado (409) como ApiError do tipo duplicate', () => {
+    it('identifica o reenvio de um evento já processado pelo cabeçalho Idempotent-Replayed', () => {
+      let outcome: TransactionOutcome | undefined;
+      TestBed.inject(TransactionsApi)
+        .submit(payload)
+        .subscribe((value) => (outcome = value));
+
+      http.expectOne('/api/transactions').flush(created, { headers: { 'Idempotent-Replayed': 'true' } });
+
+      expect(outcome).toEqual({ transaction: created, replayed: true });
+    });
+
+    it('propaga eventId reutilizado com outros dados (409) como ApiError do tipo duplicate', () => {
       let error: ApiError | undefined;
       TestBed.inject(TransactionsApi)
         .submit(payload)

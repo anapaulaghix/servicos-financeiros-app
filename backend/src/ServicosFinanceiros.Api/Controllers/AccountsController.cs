@@ -10,14 +10,12 @@ namespace ServicosFinanceiros.Api.Controllers;
 [Produces("application/json")]
 public sealed class AccountsController(IAccountQueries queries) : ControllerBase
 {
-    private readonly IAccountQueries _queries = queries;
-
     /// <summary>Lista as contas com o saldo atual consolidado.</summary>
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<AccountSummary>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
     {
-        return Ok(await _queries.ListAsync(cancellationToken));
+        return Ok(await queries.ListAsync(cancellationToken));
     }
 
     /// <summary>Consulta uma conta.</summary>
@@ -27,7 +25,7 @@ public sealed class AccountsController(IAccountQueries queries) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get(Guid accountId, CancellationToken cancellationToken)
     {
-        var account = await _queries.GetAsync(accountId, cancellationToken)
+        var account = await queries.GetAsync(accountId, cancellationToken)
                       ?? throw new AccountNotFoundException(accountId);
 
         return Ok(account);
@@ -50,7 +48,7 @@ public sealed class AccountsController(IAccountQueries queries) : ControllerBase
         [FromQuery, Range(1, 100)] int pageSize = 10,
         CancellationToken cancellationToken = default)
     {
-        var statement = await _queries.GetStatementAsync(accountId, page, pageSize, cancellationToken)
+        var statement = await queries.GetStatementAsync(accountId, page, pageSize, cancellationToken)
                         ?? throw new AccountNotFoundException(accountId);
 
         return Ok(statement);

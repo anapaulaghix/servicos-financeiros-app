@@ -9,15 +9,13 @@ namespace ServicosFinanceiros.Infrastructure.HealthChecks;
 /// </summary>
 internal sealed class RedisHealthCheck(IConnectionMultiplexer redis) : IHealthCheck
 {
-    private readonly IConnectionMultiplexer _redis = redis;
-
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var latency = await _redis.GetDatabase().PingAsync();
+            var latency = await redis.GetDatabase().PingAsync();
             return HealthCheckResult.Healthy($"Latência {latency.TotalMilliseconds:F0} ms");
         }
         catch (Exception ex) when (ex is RedisException or TimeoutException)

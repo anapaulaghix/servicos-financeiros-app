@@ -4,11 +4,11 @@ import { TransactionResult } from './account.model';
 export type Submission =
   | { status: 'idle' }
   | { status: 'processing' }
-  | { status: 'success'; result: TransactionResult; holderName: string }
+  | { status: 'success'; result: TransactionResult; holderName: string; replayed: boolean }
   | { status: 'error'; error: ApiError };
 
 export const ERROR_TITLES: Record<ApiErrorKind, string> = {
-  duplicate: 'Lançamento já registrado',
+  duplicate: 'Identificador já utilizado',
   'insufficient-funds': 'Saldo insuficiente',
   network: 'Sem conexão com o servidor',
   validation: 'Dados inválidos',

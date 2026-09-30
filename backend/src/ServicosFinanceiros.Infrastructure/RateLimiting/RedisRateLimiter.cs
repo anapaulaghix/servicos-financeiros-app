@@ -20,9 +20,6 @@ internal sealed partial class RedisRateLimiter(IConnectionMultiplexer redis, ILo
         return { current, redis.call('PTTL', @key) }
         """);
 
-    private readonly IConnectionMultiplexer _redis = redis;
-    private readonly ILogger<RedisRateLimiter> _logger = logger;
-
     public async Task<RateLimitDecision> AcquireAsync(
         string policy,
         string partitionKey,
@@ -34,7 +31,7 @@ internal sealed partial class RedisRateLimiter(IConnectionMultiplexer redis, ILo
 
         try
         {
-            var result = (RedisResult[])(await _redis.GetDatabase().ScriptEvaluateAsync(
+            var result = (RedisResult[])(await redis.GetDatabase().ScriptEvaluateAsync(
                 FixedWindowScript,
                 new { key, windowMs = (long)window.TotalMilliseconds }))!;
 
@@ -49,7 +46,7 @@ internal sealed partial class RedisRateLimiter(IConnectionMultiplexer redis, ILo
         {
             // Fail-open: Redis fora do ar não pode impedir lançamentos financeiros.
             // A indisponibilidade aparece no health check de readiness e neste log.
-            LogRedisUnavailable(_logger, ex, policy);
+            LogRedisUnavailable(logger, ex, policy);
             return RateLimitDecision.Allowed(permitLimit);
         }
     }

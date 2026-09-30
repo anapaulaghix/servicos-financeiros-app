@@ -1,4 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
+import { MonoTypeOperatorFunction, catchError, throwError } from 'rxjs';
 
 export type ApiErrorKind =
   'network' | 'validation' | 'duplicate' | 'insufficient-funds' | 'not-found' | 'rate-limited' | 'server';
@@ -56,7 +57,7 @@ export function toApiError(error: unknown): ApiError {
     case 409:
       return new ApiError(
         'duplicate',
-        'Este lançamento já havia sido processado. Nenhum valor foi lançado novamente.',
+        'O identificador deste lançamento já foi usado em outro, com dados diferentes. Nada foi lançado; envie de novo para registrá-lo.',
         409,
       );
     case 422:
@@ -74,6 +75,11 @@ export function toApiError(error: unknown): ApiError {
         error.status,
       );
   }
+}
+
+/** Operador dos serviços de API: qualquer falha da requisição sai como `ApiError`. */
+export function mapApiError<T>(): MonoTypeOperatorFunction<T> {
+  return catchError((error: unknown) => throwError(() => toApiError(error)));
 }
 
 /** Usa o Retry-After (em segundos) enviado pela API para dizer quanto tempo esperar. */

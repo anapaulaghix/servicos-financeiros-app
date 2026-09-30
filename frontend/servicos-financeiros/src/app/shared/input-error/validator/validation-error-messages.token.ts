@@ -29,7 +29,6 @@ export const ERROR_MESSAGES: Readonly<Record<string, ValidationMessageFn>> = {
     (error) => `Informe no máximo ${error.requiredLength} caracteres.`,
   ),
   maxDecimals: message<{ max: number }>((error) => `Use no máximo ${error.max} casas decimais.`),
-  uuid: () => 'Informe um identificador UUID válido.',
   // Erro vindo da API (ProblemDetails): a mensagem já é o próprio valor do erro.
   server: message<string>((serverMessage) => serverMessage),
 };

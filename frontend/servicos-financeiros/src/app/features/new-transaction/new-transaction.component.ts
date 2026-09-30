@@ -32,8 +32,8 @@ import { ApiError, ApiErrorKind } from '../../core/errors/api-error';
 import { IdempotencyKeyTracker } from '../../core/idempotency/idempotency-key-tracker';
 import {
   Account,
+  TransactionOutcome,
   TransactionRequest,
-  TransactionResult,
   TransactionType,
 } from '../../core/models/account.model';
 import { LoadState, toLoadState } from '../../core/state/load-state';
@@ -78,7 +78,12 @@ export class NewTransactionComponent {
   /** Chave de idempotência (eventId): gerada e controlada internamente, nunca exibida ao usuário. */
   private readonly idempotencyKeys = new IdempotencyKeyTracker<Omit<TransactionRequest, 'eventId'>>();
 
-  readonly conta = input<string>();
+  /**
+   * Conta pré-selecionada, vinda do query param `?conta=` (ligado pelo `withComponentInputBinding`).
+   * O alias mantém a URL em português, visível ao usuário como as rotas; o código segue em inglês.
+   */
+  // eslint-disable-next-line @angular-eslint/no-input-rename
+  readonly preselectedAccountId = input<string>(undefined, { alias: 'conta' });
 
   protected readonly typeOptions: { label: string; value: TransactionType }[] = [
     { label: 'Crédito', value: 'CREDIT' },
@@ -140,9 +145,9 @@ export class NewTransactionComponent {
   constructor() {
     // Pré-seleciona a conta recebida em `?conta=` (ex.: botão "Novo lançamento" do extrato).
     effect(() => {
-      const conta = this.conta();
-      if (conta) {
-        this.form.controls.accountId.setValue(conta);
+      const accountId = this.preselectedAccountId();
+      if (accountId) {
+        this.form.controls.accountId.setValue(accountId);
       }
     });
   }
@@ -169,7 +174,7 @@ export class NewTransactionComponent {
 
     this.submission.set({ status: 'processing' });
     this.transactionsApi.submit(request).subscribe({
-      next: (result) => this.onSuccess(result),
+      next: (outcome) => this.onSuccess(outcome),
       error: (error: ApiError) => this.onError(error),
     });
   }
@@ -186,9 +191,13 @@ export class NewTransactionComponent {
     return error.kind === 'network' || error.kind === 'server';
   }
 
-  private onSuccess(result: TransactionResult): void {
+  /**
+   * Um reenvio (`replayed`) também é sucesso: uma tentativa anterior, cuja resposta se perdeu, já tinha
+   * sido processada. A API devolve o lançamento original, que é mostrado como confirmação.
+   */
+  private onSuccess({ transaction, replayed }: TransactionOutcome): void {
     const holderName = this.selectedAccount()?.holderName ?? 'a conta';
-    this.submission.set({ status: 'success', result, holderName });
+    this.submission.set({ status: 'success', result: transaction, holderName, replayed });
 
     this.idempotencyKeys.complete();
     const { accountId, type } = this.form.getRawValue();
@@ -199,11 +208,10 @@ export class NewTransactionComponent {
   private onError(error: ApiError): void {
     this.submission.set({ status: 'error', error });
 
-    // Duplicado significa que uma tentativa anterior (cuja resposta se perdeu) já foi processada:
-    // o lançamento está confirmado, então a próxima operação usa outra chave e os saldos são recarregados.
+    // 409: a chave já foi usada com outros dados e nada foi lançado. Descartá-la faz o próximo envio
+    // ser um lançamento novo, em vez de repetir o conflito.
     if (error.kind === 'duplicate') {
       this.idempotencyKeys.complete();
-      this.reloadAccounts$.next();
       return;
     }
 

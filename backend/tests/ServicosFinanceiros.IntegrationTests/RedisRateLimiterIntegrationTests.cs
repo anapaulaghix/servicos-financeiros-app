@@ -11,15 +11,12 @@ namespace ServicosFinanceiros.IntegrationTests;
 [Collection(PostgresCollection.Name)]
 public class RedisRateLimiterIntegrationTests(PostgresFixture postgres, RedisFixture redis)
 {
-    private readonly PostgresFixture _postgres = postgres;
-    private readonly RedisFixture _redis = redis;
-
     private ServiceProvider BuildServices(string? redisConnectionString)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:Postgres"] = _postgres.ConnectionString,
+                ["ConnectionStrings:Postgres"] = postgres.ConnectionString,
                 ["ConnectionStrings:Redis"] = redisConnectionString,
             })
             .Build();
@@ -37,7 +34,7 @@ public class RedisRateLimiterIntegrationTests(PostgresFixture postgres, RedisFix
     [Fact]
     public async Task AllowsUpToTheLimitThenBlocksWithRetryAfter()
     {
-        await using var services = BuildServices(_redis.ConnectionString);
+        await using var services = BuildServices(redis.ConnectionString);
         var limiter = services.GetRequiredService<IRateLimiter>();
         var client = NewClient();
         var window = TimeSpan.FromSeconds(30);
@@ -54,7 +51,7 @@ public class RedisRateLimiterIntegrationTests(PostgresFixture postgres, RedisFix
     [Fact]
     public async Task EachClientHasItsOwnLimit()
     {
-        await using var services = BuildServices(_redis.ConnectionString);
+        await using var services = BuildServices(redis.ConnectionString);
         var limiter = services.GetRequiredService<IRateLimiter>();
         var first = NewClient();
         var second = NewClient();
@@ -70,7 +67,7 @@ public class RedisRateLimiterIntegrationTests(PostgresFixture postgres, RedisFix
     [Fact]
     public async Task WindowExpirationReleasesTheClient()
     {
-        await using var services = BuildServices(_redis.ConnectionString);
+        await using var services = BuildServices(redis.ConnectionString);
         var limiter = services.GetRequiredService<IRateLimiter>();
         var client = NewClient();
         var window = TimeSpan.FromMilliseconds(500);
@@ -87,7 +84,7 @@ public class RedisRateLimiterIntegrationTests(PostgresFixture postgres, RedisFix
     public async Task ConcurrentRequestsNeverExceedTheLimit()
     {
         // O script Lua é atômico no Redis: 50 requisições simultâneas contra um limite de 10 liberam exatamente 10.
-        await using var services = BuildServices(_redis.ConnectionString);
+        await using var services = BuildServices(redis.ConnectionString);
         var limiter = services.GetRequiredService<IRateLimiter>();
         var client = NewClient();
 

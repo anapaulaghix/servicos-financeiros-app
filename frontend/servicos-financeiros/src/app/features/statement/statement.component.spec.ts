@@ -140,6 +140,35 @@ describe('StatementComponent', () => {
     statementRequest().flush(page([], { page: 2, pageSize: 5, totalItems: 12, totalPages: 3 }));
   });
 
+  it('ao trocar de conta, volta à primeira página e não mostra os lançamentos da conta anterior', () => {
+    http.expectOne('/api/accounts/acc-1').flush(ACCOUNTS[0]);
+    statementRequest().flush(
+      page([entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000001' })], { pageSize: 5, totalItems: 12 }),
+    );
+    fixture.detectChanges();
+    fixture.debugElement.query(By.css('p-table')).triggerEventHandler('onPage', { first: 5, rows: 5 });
+    statementRequest().flush(
+      page([entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000002' })], {
+        page: 2,
+        pageSize: 5,
+        totalItems: 12,
+      }),
+    );
+    fixture.detectChanges();
+
+    // Mesma instância do componente com outra conta (ex.: navegação de /contas/acc-1 para /contas/acc-2).
+    fixture.componentRef.setInput('id', 'acc-2');
+    fixture.detectChanges();
+
+    http.expectOne('/api/accounts/acc-2').flush(ACCOUNTS[1]);
+    const next = http.expectOne((r) => r.url === '/api/accounts/acc-2/transactions');
+    expect(next.request.params.get('page')).toBe('1');
+    expect(next.request.params.get('pageSize')).toBe('5');
+    expect(root().querySelector('tbody tr')).toBeNull();
+    expect(root().querySelector('app-loading')).not.toBeNull();
+    next.flush(page([]));
+  });
+
   it('mostra "Conta não encontrada" sem oferecer nova tentativa (404)', () => {
     http.expectOne('/api/accounts/acc-1').flush(null, { status: 404, statusText: 'Not Found' });
     statementRequest().flush(null, { status: 404, statusText: 'Not Found' });

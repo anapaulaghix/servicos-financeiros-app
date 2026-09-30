@@ -50,6 +50,33 @@ public class ProcessTransactionHandlerTests
     private static ProcessTransactionCommand Command(Guid accountId, TransactionType type, decimal amount) =>
         new(Guid.NewGuid(), accountId, type, amount, Now);
 
+    /// <summary>Lançamento já gravado para o eventId do comando, com os dados informados.</summary>
+    private static Transaction StoredTransaction(ProcessTransactionCommand command, decimal amount)
+    {
+        var account = Account.Open(command.AccountId, "Ana Paula", Now);
+        return account.Apply(command.EventId, command.Type, amount, command.OccurredAt, Now.AddMinutes(-5));
+    }
+
+    private void GivenStored(Transaction transaction) =>
+        _transactions
+            .Setup(t => t.FindAsync(transaction.EventId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(transaction);
+
+    private void GivenConcurrentWinner(Transaction winner)
+    {
+        // Na primeira consulta o evento ainda não existe; ao gravar, o banco acusa a chave primária
+        // porque outra requisição com o mesmo eventId gravou antes; a segunda consulta já o encontra.
+        _transactions
+            .SetupSequence(t => t.FindAsync(winner.EventId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Transaction?)null)
+            .ReturnsAsync(winner);
+        _unitOfWork
+            .Setup(u => u.ExecuteInTransactionAsync(
+                It.IsAny<Func<CancellationToken, Task<Transaction>>>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new UniqueConstraintViolationException(new InvalidOperationException("23505")));
+    }
+
     [Fact]
     public async Task HandleAsync_ValidCredit_ShouldUpdateBalanceAndPersistTransaction()
     {
@@ -59,39 +86,66 @@ public class ProcessTransactionHandlerTests
         var result = await _handler.HandleAsync(command, CancellationToken.None);
 
         account.Balance.Should().Be(150m);
-        result.EventId.Should().Be(command.EventId);
-        result.ProcessedAt.Should().Be(Now);
-        _transactions.Verify(t => t.Add(result), Times.Once);
+        result.IsReplay.Should().BeFalse();
+        result.Transaction.EventId.Should().Be(command.EventId);
+        result.Transaction.ProcessedAt.Should().Be(Now);
+        _transactions.Verify(t => t.Add(result.Transaction), Times.Once);
     }
 
     [Fact]
-    public async Task HandleAsync_AlreadyProcessedEvent_ShouldThrowDuplicateAndNotTouchAccount()
+    public async Task HandleAsync_SameEventResent_ShouldReturnOriginalWithoutTouchingAccount()
     {
         var account = GivenAccountWithBalance(100m);
         var command = Command(account.Id, TransactionType.Credit, 50m);
-        _transactions
-            .Setup(t => t.ExistsAsync(command.EventId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+        var original = StoredTransaction(command, 50m);
+        GivenStored(original);
+
+        var result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsReplay.Should().BeTrue();
+        result.Transaction.Should().BeSameAs(original);
+        account.Balance.Should().Be(100m);
+        _transactions.Verify(t => t.Add(It.IsAny<Transaction>()), Times.Never);
+        _unitOfWork.Verify(u => u.ExecuteInTransactionAsync(
+            It.IsAny<Func<CancellationToken, Task<Transaction>>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleAsync_EventIdReusedWithDifferentData_ShouldThrowDuplicateAndNotTouchAccount()
+    {
+        var account = GivenAccountWithBalance(100m);
+        var command = Command(account.Id, TransactionType.Credit, 50m);
+        GivenStored(StoredTransaction(command, amount: 70m));
 
         var act = () => _handler.HandleAsync(command, CancellationToken.None);
 
-        await act.Should().ThrowAsync<DuplicateEventException>();
+        (await act.Should().ThrowAsync<DuplicateEventException>())
+            .Which.EventId.Should().Be(command.EventId);
         account.Balance.Should().Be(100m);
         _transactions.Verify(t => t.Add(It.IsAny<Transaction>()), Times.Never);
     }
 
     [Fact]
-    public async Task HandleAsync_UniqueViolationOnSave_ShouldBeReportedAsDuplicate()
+    public async Task HandleAsync_UniqueViolationOnSave_WithSameData_ShouldReturnTheWinnerAsReplay()
     {
-        // Duas requisições idênticas concorrentes: ambas passam pelo ExistsAsync, mas o banco
-        // rejeita a segunda gravação pela chave primária.
         var account = GivenAccountWithBalance(100m);
         var command = Command(account.Id, TransactionType.Credit, 50m);
-        _unitOfWork
-            .Setup(u => u.ExecuteInTransactionAsync(
-                It.IsAny<Func<CancellationToken, Task<Transaction>>>(),
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new UniqueConstraintViolationException(new InvalidOperationException("23505")));
+        var winner = StoredTransaction(command, 50m);
+        GivenConcurrentWinner(winner);
+
+        var result = await _handler.HandleAsync(command, CancellationToken.None);
+
+        result.IsReplay.Should().BeTrue();
+        result.Transaction.Should().BeSameAs(winner);
+    }
+
+    [Fact]
+    public async Task HandleAsync_UniqueViolationOnSave_WithDifferentData_ShouldThrowDuplicate()
+    {
+        var account = GivenAccountWithBalance(100m);
+        var command = Command(account.Id, TransactionType.Credit, 50m);
+        GivenConcurrentWinner(StoredTransaction(command, amount: 70m));
 
         var act = () => _handler.HandleAsync(command, CancellationToken.None);
 

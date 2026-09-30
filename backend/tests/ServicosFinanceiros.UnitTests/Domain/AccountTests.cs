@@ -1,3 +1,4 @@
+using System.Globalization;
 using FluentAssertions;
 using ServicosFinanceiros.Domain.Accounts;
 using ServicosFinanceiros.Domain.Exceptions;
@@ -34,7 +35,7 @@ public class AccountTests
     {
         var act = () => Account.Open(Guid.NewGuid(), holderName, Now);
 
-        act.Should().Throw<InvalidTransactionException>();
+        act.Should().Throw<InvalidAccountException>();
     }
 
     [Fact]
@@ -42,7 +43,7 @@ public class AccountTests
     {
         var act = () => Account.Open(Guid.Empty, "Ana Paula", Now);
 
-        act.Should().Throw<InvalidTransactionException>();
+        act.Should().Throw<InvalidAccountException>();
     }
 
     [Fact]
@@ -95,6 +96,26 @@ public class AccountTests
             .Which.Should().Match<InsufficientFundsException>(e =>
                 e.AccountId == account.Id && e.Balance == 100m && e.RequestedAmount == 100.01m);
         account.Balance.Should().Be(100m);
+    }
+
+    [Fact]
+    public void InsufficientFunds_MessageUsesBrazilianMoneyFormat_RegardlessOfProcessCulture()
+    {
+        var original = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture; // como no container
+        try
+        {
+            var account = AccountWithBalance(1234.5m);
+
+            var act = () => account.Apply(Guid.NewGuid(), TransactionType.Debit, 2000m, Now, Now);
+
+            act.Should().Throw<InsufficientFundsException>()
+                .WithMessage("*saldo R$ 1.234,50, débito solicitado R$ 2.000,00.");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
     }
 
     [Theory]

@@ -20,9 +20,6 @@ public class ApiIntegrationTests(PostgresFixture postgres, RedisFixture redis)
     private const int PermitLimit = 3;
     private const string TrustedProxyIp = "172.18.0.5";
 
-    private readonly PostgresFixture _postgres = postgres;
-    private readonly RedisFixture _redis = redis;
-
     /// <summary>
     /// Cria a API simulando que toda requisição chega de <paramref name="remoteIp"/>
     /// (no TestServer não há conexão real, então o IP é definido por um middleware de teste).
@@ -31,8 +28,8 @@ public class ApiIntegrationTests(PostgresFixture postgres, RedisFixture redis)
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
-            builder.UseSetting("ConnectionStrings:Postgres", _postgres.ConnectionString);
-            builder.UseSetting("ConnectionStrings:Redis", _redis.ConnectionString);
+            builder.UseSetting("ConnectionStrings:Postgres", postgres.ConnectionString);
+            builder.UseSetting("ConnectionStrings:Redis", redis.ConnectionString);
             builder.UseSetting("RateLimiting:Transactions:PermitLimit", PermitLimit.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.UseSetting("RateLimiting:Transactions:WindowSeconds", "60");
             builder.UseSetting("ReverseProxy:TrustedProxies:0", TrustedProxyIp);

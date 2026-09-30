@@ -1,8 +1,8 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, catchError, throwError } from 'rxjs';
+import { Observable } from 'rxjs';
 
-import { toApiError } from '../errors/api-error';
+import { mapApiError } from '../errors/api-error';
 import { Account, Page, StatementEntry } from '../models/account.model';
 import { API_BASE } from './api.config';
 
@@ -11,15 +11,11 @@ export class AccountsApi {
   private readonly http = inject(HttpClient);
 
   list(): Observable<Account[]> {
-    return this.http
-      .get<Account[]>(`${API_BASE}/accounts`)
-      .pipe(catchError((error) => throwError(() => toApiError(error))));
+    return this.http.get<Account[]>(`${API_BASE}/accounts`).pipe(mapApiError());
   }
 
   get(accountId: string): Observable<Account> {
-    return this.http
-      .get<Account>(`${API_BASE}/accounts/${accountId}`)
-      .pipe(catchError((error) => throwError(() => toApiError(error))));
+    return this.http.get<Account>(`${API_BASE}/accounts/${accountId}`).pipe(mapApiError());
   }
 
   /** Extrato paginado. `page` começa em 1, como na API. */
@@ -28,6 +24,6 @@ export class AccountsApi {
 
     return this.http
       .get<Page<StatementEntry>>(`${API_BASE}/accounts/${accountId}/transactions`, { params })
-      .pipe(catchError((error) => throwError(() => toApiError(error))));
+      .pipe(mapApiError());
   }
 }

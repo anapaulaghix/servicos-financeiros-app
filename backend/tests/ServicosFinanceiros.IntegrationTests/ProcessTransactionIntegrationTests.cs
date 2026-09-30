@@ -14,27 +14,28 @@ namespace ServicosFinanceiros.IntegrationTests;
 [Collection(PostgresCollection.Name)]
 public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
 {
-    private readonly PostgresFixture _fixture = fixture;
+    // Data fixa: reenvios do mesmo evento precisam chegar com dados idênticos.
+    private static readonly DateTimeOffset OccurredAt = new(2026, 1, 30, 10, 15, 0, TimeSpan.Zero);
 
     /// <summary>Executa um evento em um escopo próprio, como faria uma requisição HTTP independente.</summary>
-    private async Task<Transaction> ProcessAsync(Guid accountId, TransactionType type, decimal amount, Guid? eventId = null)
+    private async Task<ProcessTransactionResult> ProcessAsync(Guid accountId, TransactionType type, decimal amount, Guid? eventId = null)
     {
-        await using var scope = _fixture.Services.CreateAsyncScope();
+        await using var scope = fixture.Services.CreateAsyncScope();
         var handler = scope.ServiceProvider.GetRequiredService<IProcessTransactionHandler>();
 
         return await handler.HandleAsync(
-            new ProcessTransactionCommand(eventId ?? Guid.NewGuid(), accountId, type, amount, DateTimeOffset.UtcNow),
+            new ProcessTransactionCommand(eventId ?? Guid.NewGuid(), accountId, type, amount, OccurredAt),
             CancellationToken.None);
     }
 
     [Fact]
     public async Task Credit_ShouldPersistTransactionAndBalanceTogether()
     {
-        var accountId = await _fixture.CreateAccountAsync(100m);
+        var accountId = await fixture.CreateAccountAsync(100m);
 
-        var result = await ProcessAsync(accountId, TransactionType.Credit, 50.25m);
+        var result = (await ProcessAsync(accountId, TransactionType.Credit, 50.25m)).Transaction;
 
-        var (balance, transactions) = await _fixture.ReadAccountAsync(accountId);
+        var (balance, transactions) = await fixture.ReadAccountAsync(accountId);
         balance.Should().Be(150.25m);
         result.BalanceAfter.Should().Be(150.25m);
         transactions.Should().HaveCount(2); // crédito inicial + o novo
@@ -42,16 +43,34 @@ public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task SameEventSentTwice_ShouldBeRejectedAndBalanceCountedOnce()
+    public async Task SameEventSentTwice_ShouldReturnTheOriginalAndCountTheBalanceOnce()
     {
-        var accountId = await _fixture.CreateAccountAsync(100m);
+        var accountId = await fixture.CreateAccountAsync(100m);
         var eventId = Guid.NewGuid();
 
-        await ProcessAsync(accountId, TransactionType.Credit, 40m, eventId);
-        var second = () => ProcessAsync(accountId, TransactionType.Credit, 40m, eventId);
+        var first = await ProcessAsync(accountId, TransactionType.Credit, 40m, eventId);
+        var second = await ProcessAsync(accountId, TransactionType.Credit, 40m, eventId);
 
-        await second.Should().ThrowAsync<DuplicateEventException>();
-        var (balance, transactions) = await _fixture.ReadAccountAsync(accountId);
+        first.IsReplay.Should().BeFalse();
+        second.IsReplay.Should().BeTrue();
+        second.Transaction.BalanceAfter.Should().Be(140m);
+        second.Transaction.ProcessedAt.Should().Be(first.Transaction.ProcessedAt);
+        var (balance, transactions) = await fixture.ReadAccountAsync(accountId);
+        balance.Should().Be(140m);
+        transactions.Count(t => t.EventId == eventId).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SameEventIdWithDifferentData_ShouldBeRejectedAndLeaveTheBalanceUntouched()
+    {
+        var accountId = await fixture.CreateAccountAsync(100m);
+        var eventId = Guid.NewGuid();
+        await ProcessAsync(accountId, TransactionType.Credit, 40m, eventId);
+
+        var reused = () => ProcessAsync(accountId, TransactionType.Debit, 40m, eventId);
+
+        await reused.Should().ThrowAsync<DuplicateEventException>();
+        var (balance, transactions) = await fixture.ReadAccountAsync(accountId);
         balance.Should().Be(140m);
         transactions.Count(t => t.EventId == eventId).Should().Be(1);
     }
@@ -59,12 +78,12 @@ public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
     [Fact]
     public async Task DebitAboveBalance_ShouldBeRejectedAndLeaveNoTrace()
     {
-        var accountId = await _fixture.CreateAccountAsync(100m);
+        var accountId = await fixture.CreateAccountAsync(100m);
 
         var act = () => ProcessAsync(accountId, TransactionType.Debit, 100.01m);
 
         await act.Should().ThrowAsync<InsufficientFundsException>();
-        var (balance, transactions) = await _fixture.ReadAccountAsync(accountId);
+        var (balance, transactions) = await fixture.ReadAccountAsync(accountId);
         balance.Should().Be(100m);
         transactions.Should().HaveCount(1);
     }
@@ -78,27 +97,19 @@ public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task IdenticalEventsInParallel_ShouldProcessExactlyOnce()
+    public async Task IdenticalEventsInParallel_ShouldProcessExactlyOnceAndAnswerAllWithTheSameResult()
     {
         // Simula um cliente que reenvia o mesmo evento várias vezes ao mesmo tempo (retry agressivo).
-        var accountId = await _fixture.CreateAccountAsync(0m);
+        // Todas as requisições recebem o lançamento; só uma o grava, as demais recebem o reenvio.
+        var accountId = await fixture.CreateAccountAsync(0m);
         var eventId = Guid.NewGuid();
 
-        var outcomes = await Task.WhenAll(Enumerable.Range(0, 10).Select(async _ =>
-        {
-            try
-            {
-                await ProcessAsync(accountId, TransactionType.Credit, 25m, eventId);
-                return true;
-            }
-            catch (DuplicateEventException)
-            {
-                return false;
-            }
-        }));
+        var outcomes = await Task.WhenAll(Enumerable.Range(0, 10)
+            .Select(_ => ProcessAsync(accountId, TransactionType.Credit, 25m, eventId)));
 
-        outcomes.Count(succeeded => succeeded).Should().Be(1);
-        var (balance, transactions) = await _fixture.ReadAccountAsync(accountId);
+        outcomes.Count(outcome => !outcome.IsReplay).Should().Be(1);
+        outcomes.Should().OnlyContain(outcome => outcome.Transaction.EventId == eventId && outcome.Transaction.BalanceAfter == 25m);
+        var (balance, transactions) = await fixture.ReadAccountAsync(accountId);
         balance.Should().Be(25m);
         transactions.Should().ContainSingle(t => t.EventId == eventId);
     }
@@ -108,7 +119,7 @@ public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
     {
         // 10 débitos de 20 disputando uma conta de 100: só 5 cabem. Sem bloqueio da linha,
         // todos leriam saldo 100 e passariam.
-        var accountId = await _fixture.CreateAccountAsync(100m);
+        var accountId = await fixture.CreateAccountAsync(100m);
 
         var outcomes = await Task.WhenAll(Enumerable.Range(0, 10).Select(async _ =>
         {
@@ -124,7 +135,7 @@ public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
         }));
 
         outcomes.Count(succeeded => succeeded).Should().Be(5);
-        var (balance, transactions) = await _fixture.ReadAccountAsync(accountId);
+        var (balance, transactions) = await fixture.ReadAccountAsync(accountId);
         balance.Should().Be(0m);
         transactions.Where(t => t.Type == TransactionType.Debit).Should().HaveCount(5);
     }
@@ -132,7 +143,7 @@ public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
     [Fact]
     public async Task BalanceShouldEqualSumOfTransactionHistoryAfterConcurrentActivity()
     {
-        var accountId = await _fixture.CreateAccountAsync(200m);
+        var accountId = await fixture.CreateAccountAsync(200m);
 
         await Task.WhenAll(Enumerable.Range(0, 20).Select(async i =>
         {
@@ -147,7 +158,7 @@ public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
             }
         }));
 
-        var (balance, transactions) = await _fixture.ReadAccountAsync(accountId);
+        var (balance, transactions) = await fixture.ReadAccountAsync(accountId);
         balance.Should().Be(transactions.Sum(t => t.SignedAmount));
         balance.Should().BeGreaterThanOrEqualTo(0m);
     }
@@ -157,10 +168,10 @@ public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
     {
         // Prova a atomicidade: o saldo é alterado e o lançamento é inserido no mesmo SaveChanges,
         // mas o eventId já existe. O banco rejeita o insert e o UPDATE do saldo precisa ser desfeito.
-        var accountId = await _fixture.CreateAccountAsync(100m);
-        var existing = await ProcessAsync(accountId, TransactionType.Credit, 10m); // saldo 110
+        var accountId = await fixture.CreateAccountAsync(100m);
+        var existing = (await ProcessAsync(accountId, TransactionType.Credit, 10m)).Transaction; // saldo 110
 
-        await using var scope = _fixture.Services.CreateAsyncScope();
+        await using var scope = fixture.Services.CreateAsyncScope();
         var accounts = scope.ServiceProvider.GetRequiredService<IAccountRepository>();
         var transactions = scope.ServiceProvider.GetRequiredService<ITransactionRepository>();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -174,7 +185,7 @@ public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
         }, CancellationToken.None);
 
         await act.Should().ThrowAsync<UniqueConstraintViolationException>();
-        var (balance, history) = await _fixture.ReadAccountAsync(accountId);
+        var (balance, history) = await fixture.ReadAccountAsync(accountId);
         balance.Should().Be(110m); // os +500 não foram gravados
         history.Should().HaveCount(2);
     }

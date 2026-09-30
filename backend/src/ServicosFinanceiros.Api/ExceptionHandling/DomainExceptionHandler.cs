@@ -7,9 +7,6 @@ namespace ServicosFinanceiros.Api.ExceptionHandling;
 /// <summary>Traduz exceções de domínio em respostas HTTP no formato ProblemDetails.</summary>
 public sealed partial class DomainExceptionHandler(IProblemDetailsService problemDetailsService, ILogger<DomainExceptionHandler> logger) : IExceptionHandler
 {
-    private readonly IProblemDetailsService _problemDetailsService = problemDetailsService;
-    private readonly ILogger<DomainExceptionHandler> _logger = logger;
-
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,
         Exception exception,
@@ -20,20 +17,21 @@ public sealed partial class DomainExceptionHandler(IProblemDetailsService proble
 
         var (status, title, rejection) = domainException switch
         {
-            DuplicateEventException => (StatusCodes.Status409Conflict, "Evento duplicado", nameof(DuplicateEventException)),
+            DuplicateEventException => (StatusCodes.Status409Conflict, "Identificador de evento já utilizado", nameof(DuplicateEventException)),
             InsufficientFundsException => (StatusCodes.Status422UnprocessableEntity, "Saldo insuficiente", nameof(InsufficientFundsException)),
             AccountNotFoundException => (StatusCodes.Status404NotFound, "Conta não encontrada", nameof(AccountNotFoundException)),
             InvalidTransactionException => (StatusCodes.Status400BadRequest, "Transação inválida", nameof(InvalidTransactionException)),
+            InvalidAccountException => (StatusCodes.Status400BadRequest, "Conta inválida", nameof(InvalidAccountException)),
             _ => (StatusCodes.Status400BadRequest, "Requisição inválida", nameof(DomainException))
         };
 
         // Regra de negócio recusando uma operação é comportamento esperado, não falha do sistema:
         // Information, com o tipo da recusa como propriedade para filtrar e contar no Elasticsearch.
-        LogRejected(_logger, rejection, status, domainException.Message);
+        LogRejected(logger, rejection, status, domainException.Message);
 
         httpContext.Response.StatusCode = status;
 
-        return await _problemDetailsService.TryWriteAsync(new ProblemDetailsContext
+        return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = httpContext,
             Exception = exception,

@@ -193,6 +193,34 @@ describe('NewTransactionComponent', () => {
       expect(root().querySelector('app-input-error')).toBeNull();
     });
 
+    it('reenvio já processado (200 com Idempotent-Replayed): confirma o lançamento original, sem lançar de novo', () => {
+      fillValid();
+      submit();
+      const first = expectPost();
+      first.error(new ProgressEvent('error'), { status: 0 });
+
+      // A primeira tentativa tinha chegado ao servidor; o reenvio com a mesma chave devolve o original.
+      submit();
+      const retry = expectPost();
+      expect(retry.request.body.eventId).toBe(first.request.body.eventId);
+      retry.flush(result, { headers: { 'Idempotent-Replayed': 'true' } });
+      fixture.detectChanges();
+
+      expect(textOf(root())).toContain('Lançamento já registrado');
+      expect(textOf(root())).toContain('nada foi lançado de novo');
+      expect(textOf(root())).toContain('Saldo após o lançamento: R$ 1.750,50');
+      expect(textOf(root())).not.toContain('Novo saldo');
+      http.expectOne('/api/accounts').flush(ACCOUNTS);
+
+      // Confirmado: um novo envio com os mesmos dados é outro lançamento, com outra chave.
+      component.form.patchValue({ amount: 250.5, occurredAt: new Date(first.request.body.occurredAt) });
+      submit();
+      const next = expectPost();
+      expect(next.request.body.eventId).not.toBe(first.request.body.eventId);
+      next.flush(result);
+      http.expectOne('/api/accounts').flush(ACCOUNTS);
+    });
+
     it('não envia duas vezes enquanto o primeiro envio está em andamento', () => {
       fillValid();
 
@@ -207,18 +235,17 @@ describe('NewTransactionComponent', () => {
   });
 
   describe('respostas de erro da API', () => {
-    it('duplicado (409): informa que o lançamento já estava registrado e recarrega os saldos', () => {
+    it('identificador já usado com outros dados (409): informa que nada foi lançado e o novo envio usa outra chave', () => {
       fillValid();
       submit();
       const first = expectPost();
       first.flush({}, { status: 409, statusText: 'Conflict' });
       fixture.detectChanges();
 
-      expect(textOf(root())).toContain('Lançamento já registrado');
-      expect(textOf(root())).toContain('Nenhum valor foi lançado novamente.');
-      http.expectOne('/api/accounts').flush(ACCOUNTS);
+      expect(textOf(root())).toContain('Identificador já utilizado');
+      expect(textOf(root())).toContain('Nada foi lançado');
 
-      // Confirmado pelo servidor: um novo envio, mesmo com dados iguais, é outro lançamento.
+      // A chave em conflito é descartada: o próximo envio é um lançamento novo.
       submit();
       const second = expectPost();
       expect(second.request.body.eventId).not.toBe(first.request.body.eventId);

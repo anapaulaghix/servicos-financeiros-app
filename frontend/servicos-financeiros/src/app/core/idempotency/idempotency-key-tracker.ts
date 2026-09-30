@@ -5,7 +5,7 @@ import { newUuid } from '../utils/uuid';
  *
  * A mesma chave é reutilizada enquanto o usuário reenvia exatamente os mesmos dados de uma tentativa
  * que não teve confirmação (ex.: a rede caiu). Assim, se a primeira tentativa chegou ao servidor, a
- * segunda é reconhecida como duplicada e nada é lançado duas vezes. Qualquer alteração nos dados, ou
+ * segunda recebe o lançamento original (reenvio) e nada é lançado duas vezes. Qualquer alteração nos dados, ou
  * a confirmação da tentativa (`complete`), faz a próxima operação receber uma chave nova.
  */
 export class IdempotencyKeyTracker<T> {

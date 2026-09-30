@@ -84,7 +84,7 @@ Nada aqui conhece componentes ou templates, então tudo é testável isoladament
 | `api/api.config.ts` | `API_BASE = '/api'`. A URL é relativa de propósito: o proxy (dev) ou o nginx (Docker) encaminha para a API, então não há CORS nem URL por ambiente. |
 | `api/accounts-api.service.ts` | `list()`, `get(id)` e `statement(id, page, pageSize)`. Retornam `Observable` tipado e convertem qualquer falha HTTP em `ApiError`. |
 | `api/transactions-api.service.ts` | `submit(request)`: `POST /api/transactions`. |
-| `errors/api-error.ts` | `toApiError()` traduz `HttpErrorResponse`/`ProblemDetails` em `ApiError` com um `kind`: `network`, `validation`, `duplicate`, `insufficient-funds`, `not-found`, `rate-limited`, `server`. Os componentes reagem ao `kind` e nunca a códigos HTTP; a mensagem do 429 usa o `Retry-After`. |
+| `errors/api-error.ts` | `toApiError()` traduz `HttpErrorResponse`/`ProblemDetails` em `ApiError` com um `kind`: `network`, `validation`, `duplicate`, `insufficient-funds`, `not-found`, `rate-limited`, `server`. Os componentes reagem ao `kind` e nunca a códigos HTTP; a mensagem do 429 usa o `Retry-After`. `mapApiError()` é o operador RxJS que os serviços aplicam para isso. |
 | `state/load-state.ts` | Operador RxJS `toLoadState()`: transforma uma chamada em `loading → ready \| error`. Dentro de um `switchMap`, cada nova chamada emite `loading` primeiro e uma falha vira estado, sem encerrar o fluxo. |
 | `idempotency/idempotency-key-tracker.ts` | Gera o `eventId` (chave de idempotência) sem mostrá-lo ao usuário. Reutiliza a chave quando os mesmos dados são reenviados após uma falha sem confirmação; qualquer mudança nos dados, ou a confirmação do servidor, gera chave nova. |
 | `models/account.model.ts` | Contratos da API: `Account`, `StatementEntry`, `Page<T>`, `TransactionRequest`, `TransactionResult`, `TransactionType`. |
@@ -99,8 +99,8 @@ Cada tela é um componente standalone com template, estilos e testes próprios, 
 | Pasta | Rota | O que faz |
 |---|---|---|
 | `accounts/` | `/contas` | Saldo consolidado, número de contas e um cartão por conta com o saldo atual e o link para o extrato. Trata carregamento, lista vazia e erro com "Tentar novamente". |
-| `statement/` | `/contas/:id` | Saldo atual e extrato paginado em `p-table` (modo *lazy*: a paginação é feita pela API). Mostra valor com sinal (+/−), tipo e saldo após cada lançamento. Mantém a página anterior visível enquanto a próxima carrega. |
-| `new-transaction/` | `/lancamento` e `/lancamento?conta=<id>` | Formulário reativo de lançamento: conta, tipo, valor e data. Prévia do saldo após o lançamento (só orientação; quem decide é a API), bloqueio de envio duplo e mensagens para sucesso, processando, duplicado, saldo insuficiente, limite de requisições e falha de rede. |
+| `statement/` | `/contas/:id` | Saldo atual e extrato paginado em `p-table` (modo *lazy*: a paginação é feita pela API). Mostra valor com sinal (+/−), tipo e saldo após cada lançamento. Mantém a página anterior visível enquanto a próxima carrega, e ao trocar de conta volta à primeira página sem mostrar lançamentos da conta anterior. |
+| `new-transaction/` | `/lancamento` e `/lancamento?conta=<id>` | Formulário reativo de lançamento: conta, tipo, valor e data. Prévia do saldo após o lançamento (só orientação; quem decide é a API), bloqueio de envio duplo e mensagens para sucesso, reenvio já registrado, processando, `eventId` em conflito, saldo insuficiente, limite de requisições e falha de rede. |
 
 ### `layout/`: estrutura das telas
 
@@ -137,7 +137,7 @@ Cada tela é um componente standalone com template, estilos e testes próprios, 
 ```
 componente ──chama──▶ serviço de API ──HttpClient──▶ /api/...
     ▲                     │
-    │                     └─ erro? catchError → toApiError() → ApiError { kind, message }
+    │                     └─ erro? mapApiError() → toApiError() → ApiError { kind, message }
     │
     └── template ◀── toLoadState(): { loading } → { ready, data } | { error, ApiError }
 ```
@@ -168,7 +168,7 @@ shared/input-error/
 │   └── error-state-matcher.service.ts        regra de QUANDO o erro fica visível
 └── validator/
     ├── validation-error-messages.token.ts    mapa chave do erro → mensagem (InjectionToken)
-    └── custom-validators.ts                  validadores do projeto (maxDecimals, uuid)
+    └── custom-validators.ts                  validadores do projeto (maxDecimals)
 ```
 
 | Peça | Papel |
@@ -179,7 +179,7 @@ shared/input-error/
 | `ErrorStateMatcherService` | Critério padrão: o erro aparece quando o campo foi **alterado** (`dirty`) ou o formulário foi **enviado**. |
 | `OnTouchedErrorStateMatcherService` | Critério alternativo: também quando o usuário **sai do campo** (`touched`) sem preencher. |
 | `VALIDATION_ERROR_MESSAGES` | `InjectionToken` com as mensagens. Pode ser substituído por um provider (ex.: outro idioma). |
-| `CustomValidators` | `maxDecimals(n)` (valores monetários) e `uuid()`. |
+| `CustomValidators` | `maxDecimals(n)` (valores monetários). |
 
 ### Como usar
 
@@ -244,7 +244,6 @@ Ao enviar com o campo vazio, aparece "Campo obrigatório." abaixo dele, e o camp
 | `min` / `max` | `Validators.min` / `max` | O valor mínimo/máximo é *N* (formatado em pt-BR, ex.: 0,01). |
 | `minlength` / `maxlength` | `Validators.minLength` / `maxLength` | Informe no mínimo/máximo *N* caracteres. |
 | `maxDecimals` | `CustomValidators.maxDecimals(n)` | Use no máximo *N* casas decimais. |
-| `uuid` | `CustomValidators.uuid()` | Informe um identificador UUID válido. |
 | `server` | Erro de validação vindo da API | A própria mensagem enviada pelo servidor. |
 
 **Para adicionar um validador novo:** crie o validador (ex.: em `CustomValidators`) retornando `{ minhaChave: valor }` e acrescente `minhaChave: (valor) => '...'` em `ERROR_MESSAGES`. Nenhum formulário precisa mudar.
@@ -300,7 +299,7 @@ Para aplicar outra marca, basta alterar dois arquivos: `styles/_tokens.scss` (va
 
 ## Testes
 
-Jasmine + Karma, 76 testes. Rodam em Chrome headless com `npm run test:ci`.
+Jasmine + Karma, 79 testes. Rodam em Chrome headless com `npm run test:ci`.
 
 | Arquivo | O que cobre |
 |---|---|
@@ -308,7 +307,7 @@ Jasmine + Karma, 76 testes. Rodam em Chrome headless com `npm run test:ci`.
 | `core/api/api.services.spec.ts` | URLs, métodos, corpo do `POST`, parâmetros de paginação e propagação de erros (sem chamadas reais: `HttpTestingController`). |
 | `core/idempotency/idempotency-key-tracker.spec.ts` | Mesma chave no reenvio dos mesmos dados; chave nova ao mudar os dados ou após confirmação. |
 | `core/utils/uuid.spec.ts` | UUID válido, *fallback* sem `crypto.randomUUID` e rejeição de formatos inválidos. |
-| `features/**/*.spec.ts` | Estados de carregamento, vazio e erro; renderização; paginação; validações; envio; respostas 409, 422, 429, 400 e falha de rede; `eventId` nunca exibido. |
+| `features/**/*.spec.ts` | Estados de carregamento, vazio e erro; renderização; paginação; validações; envio; reenvio confirmado (200 com `Idempotent-Replayed`); respostas 409, 422, 429, 400 e falha de rede; `eventId` nunca exibido. |
 | `layout/layout.spec.ts` | Raiz só com o roteador, telas dentro do layout e navegação ativa. |
 | `shared/input-error/**/*.spec.ts` | Ver [testes da validação](#testes-da-validação). |
 

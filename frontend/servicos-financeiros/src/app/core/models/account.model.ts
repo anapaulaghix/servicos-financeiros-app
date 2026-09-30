@@ -33,6 +33,16 @@ export interface TransactionRequest {
   occurredAt: string;
 }
 
+/** Resultado do POST /api/transactions. */
+export interface TransactionOutcome {
+  transaction: TransactionResult;
+  /**
+   * O evento já tinha sido processado (reenvio com os mesmos dados): a API devolveu o lançamento
+   * original e nada foi lançado de novo.
+   */
+  replayed: boolean;
+}
+
 export interface TransactionResult {
   eventId: string;
   accountId: string;

@@ -4,7 +4,7 @@ import { toObservable } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import { TableModule, TablePageEvent } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
-import { BehaviorSubject, combineLatest, scan, switchMap } from 'rxjs';
+import { BehaviorSubject, combineLatest, map, scan, switchMap } from 'rxjs';
 import { AccountsApi } from '../../core/api/accounts-api.service';
 import { toLoadState } from '../../core/state/load-state';
 import { ErrorPanelComponent } from '../../shared/error-panel/error-panel.component';
@@ -47,18 +47,25 @@ export class StatementComponent {
   );
 
   protected readonly view$ = combineLatest([this.id$, this.paging$, this.reload$]).pipe(
-    switchMap(([id, { pageIndex, pageSize }]) =>
-      this.api.statement(id, pageIndex + 1, pageSize).pipe(toLoadState()),
-    ),
+    switchMap(([id, paging]) => {
+      // A página escolhida vale só para a conta em que foi escolhida: trocando de conta, volta à primeira.
+      const pageIndex = paging.accountId === id ? paging.pageIndex : 0;
+      return this.api.statement(id, pageIndex + 1, paging.pageSize).pipe(
+        toLoadState(),
+        map((state) => ({ id, state })),
+      );
+    }),
     scan(
-      (previous: StatementView, state): StatementView => {
+      (previous: StatementView, { id, state }): StatementView => {
+        // Enquanto carrega (ou se falhar), mantém a página anterior só se ela for da mesma conta.
+        const data = previous.accountId === id ? previous.data : undefined;
         switch (state.status) {
           case 'loading':
-            return { data: previous.data, loading: true };
+            return { accountId: id, data, loading: true };
           case 'ready':
-            return { data: state.data, loading: false };
+            return { accountId: id, data: state.data, loading: false };
           case 'error':
-            return { data: previous.data, loading: false, error: state.error };
+            return { accountId: id, data, loading: false, error: state.error };
         }
       },
       { loading: true },
@@ -66,7 +73,11 @@ export class StatementComponent {
   );
 
   protected onPage(event: TablePageEvent): void {
-    this.paging$.next({ pageIndex: Math.floor(event.first / event.rows), pageSize: event.rows });
+    this.paging$.next({
+      accountId: this.id(),
+      pageIndex: Math.floor(event.first / event.rows),
+      pageSize: event.rows,
+    });
   }
 
   protected reload(): void {
