@@ -1,3 +1,4 @@
+using System.Globalization;
 using Elastic.Ingest.Elasticsearch;
 using Elastic.Ingest.Elasticsearch.DataStreams;
 using Elastic.Serilog.Sinks;
@@ -30,6 +31,7 @@ public static class StructuredLogging
             if (builder.Environment.IsDevelopment())
             {
                 logger.WriteTo.Console(
+                    formatProvider: CultureInfo.InvariantCulture,
                     outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}");
             }
             else

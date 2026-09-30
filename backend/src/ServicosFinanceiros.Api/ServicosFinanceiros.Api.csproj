@@ -4,6 +4,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Comentários XML alimentam o Swagger; CS1591 desligado para não exigir comentário em tudo. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <UserSecretsId>b186e404-7ae4-40c1-b3f0-d068aa20d674</UserSecretsId>
   </PropertyGroup>
 

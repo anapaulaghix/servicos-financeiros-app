@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ServicosFinanceiros.Application.Abstractions;
 using ServicosFinanceiros.Application.Accounts;
+using ServicosFinanceiros.Application.Transactions;
 using ServicosFinanceiros.Infrastructure.HealthChecks;
 using ServicosFinanceiros.Infrastructure.Persistence;
 using ServicosFinanceiros.Infrastructure.Persistence.Repositories;
@@ -37,6 +38,7 @@ public static class DependencyInjection
         services.AddScoped<ITransactionRepository, TransactionRepository>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
         services.AddScoped<IAccountQueries, AccountQueries>();
+        services.AddScoped<ITransactionQueries, TransactionQueries>();
         services.AddSingleton(TimeProvider.System);
 
         var healthChecks = services.AddHealthChecks()

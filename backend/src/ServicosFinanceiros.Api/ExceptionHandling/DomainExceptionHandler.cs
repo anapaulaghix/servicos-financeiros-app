@@ -5,7 +5,7 @@ using ServicosFinanceiros.Domain.Exceptions;
 namespace ServicosFinanceiros.Api.ExceptionHandling;
 
 /// <summary>Traduz exceções de domínio em respostas HTTP no formato ProblemDetails.</summary>
-public sealed class DomainExceptionHandler(IProblemDetailsService problemDetailsService, ILogger<DomainExceptionHandler> logger) : IExceptionHandler
+public sealed partial class DomainExceptionHandler(IProblemDetailsService problemDetailsService, ILogger<DomainExceptionHandler> logger) : IExceptionHandler
 {
     private readonly IProblemDetailsService _problemDetailsService = problemDetailsService;
     private readonly ILogger<DomainExceptionHandler> _logger = logger;
@@ -18,20 +18,18 @@ public sealed class DomainExceptionHandler(IProblemDetailsService problemDetails
         if (exception is not DomainException domainException)
             return false;
 
-        var (status, title) = domainException switch
+        var (status, title, rejection) = domainException switch
         {
-            DuplicateEventException => (StatusCodes.Status409Conflict, "Evento duplicado"),
-            InsufficientFundsException => (StatusCodes.Status422UnprocessableEntity, "Saldo insuficiente"),
-            AccountNotFoundException => (StatusCodes.Status404NotFound, "Conta não encontrada"),
-            InvalidTransactionException => (StatusCodes.Status400BadRequest, "Transação inválida"),
-            _ => (StatusCodes.Status400BadRequest, "Requisição inválida")
+            DuplicateEventException => (StatusCodes.Status409Conflict, "Evento duplicado", nameof(DuplicateEventException)),
+            InsufficientFundsException => (StatusCodes.Status422UnprocessableEntity, "Saldo insuficiente", nameof(InsufficientFundsException)),
+            AccountNotFoundException => (StatusCodes.Status404NotFound, "Conta não encontrada", nameof(AccountNotFoundException)),
+            InvalidTransactionException => (StatusCodes.Status400BadRequest, "Transação inválida", nameof(InvalidTransactionException)),
+            _ => (StatusCodes.Status400BadRequest, "Requisição inválida", nameof(DomainException))
         };
 
         // Regra de negócio recusando uma operação é comportamento esperado, não falha do sistema:
         // Information, com o tipo da recusa como propriedade para filtrar e contar no Elasticsearch.
-        _logger.LogInformation(
-            "Operação recusada ({Rejection:l}, HTTP {StatusCode}): {Reason:l}",
-            domainException.GetType().Name, status, domainException.Message);
+        LogRejected(_logger, rejection, status, domainException.Message);
 
         httpContext.Response.StatusCode = status;
 
@@ -47,4 +45,7 @@ public sealed class DomainExceptionHandler(IProblemDetailsService problemDetails
             }
         });
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Operação recusada ({Rejection:l}, HTTP {StatusCode}): {Reason:l}")]
+    private static partial void LogRejected(ILogger logger, string rejection, int statusCode, string reason);
 }

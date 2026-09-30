@@ -34,8 +34,10 @@ public sealed class AccountsController(IAccountQueries queries) : ControllerBase
     }
 
     /// <summary>Extrato paginado, do lançamento mais recente para o mais antigo.</summary>
+    /// <param name="accountId">Conta cujo extrato será consultado.</param>
     /// <param name="page">Página, começando em 1.</param>
     /// <param name="pageSize">Itens por página (1 a 100).</param>
+    /// <param name="cancellationToken">Cancelamento da requisição.</param>
     /// <response code="400">Parâmetros de paginação inválidos.</response>
     /// <response code="404">Conta não encontrada.</response>
     [HttpGet("{accountId:guid}/transactions")]

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -18,9 +19,16 @@ builder.Services
 
 builder.Services
     .AddControllers()
+    .ConfigureApiBehaviorOptions(options =>
+        options.InvalidModelStateResponseFactory = ValidationProblemFactory.Create)
     .AddJsonOptions(options =>
+    {
+        // "CREDIT"/"DEBIT" apenas: um número (ex.: 2) não pode virar um tipo de lançamento.
         options.JsonSerializerOptions.Converters.Add(
-            new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseUpper)));
+            new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseUpper, allowIntegerValues: false));
+        // Mensagens do desserializador expõem nomes de tipos internos; o 400 usa textos próprios.
+        options.AllowInputFormatterExceptionMessages = false;
+    });
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<DomainExceptionHandler>();
@@ -31,18 +39,24 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// A API fica atrás do nginx: o IP do cliente chega em X-Forwarded-For. Só o IP do proxy configurado
+// (ReverseProxy:TrustedProxies; no Docker, o IP fixo do nginx) pode informá-lo. Quem chama a API
+// direto não consegue forjar o próprio IP para burlar o rate limiting.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
-    options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("10.0.0.0/8"));
-    options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("172.16.0.0/12"));
-    options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("192.168.0.0/16"));
+    foreach (var proxy in builder.Configuration.GetSection("ReverseProxy:TrustedProxies").Get<string[]>() ?? [])
+        options.KnownProxies.Add(IPAddress.Parse(proxy));
 });
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    // Comentários XML dos controllers e contratos viram descrições e exemplos no Swagger.
+    options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, "ServicosFinanceiros.Api.xml"));
+});
 
 var app = builder.Build();
 

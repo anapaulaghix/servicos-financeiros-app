@@ -10,7 +10,7 @@ namespace ServicosFinanceiros.Api.RateLimiting;
 /// (o IP real chega via X-Forwarded-For, tratado pelo UseForwardedHeaders antes deste middleware).
 /// Acima do limite responde 429 com ProblemDetails e o cabeçalho Retry-After.
 /// </summary>
-public sealed class RateLimitingMiddleware(RequestDelegate next)
+public sealed partial class RateLimitingMiddleware(RequestDelegate next)
 {
     private readonly RequestDelegate _next = next;
 
@@ -44,9 +44,7 @@ public sealed class RateLimitingMiddleware(RequestDelegate next)
         }
 
         var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(decision.RetryAfter.TotalSeconds));
-        logger.LogWarning(
-            "Limite de requisições excedido na política {Policy:l} pelo cliente {ClientIp:l}; nova tentativa em {RetryAfterSeconds}s",
-            attribute.Policy, clientKey, retryAfterSeconds);
+        LogLimitExceeded(logger, attribute.Policy, clientKey, retryAfterSeconds);
 
         context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
@@ -63,4 +61,8 @@ public sealed class RateLimitingMiddleware(RequestDelegate next)
             },
         });
     }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Limite de requisições excedido na política {Policy:l} pelo cliente {ClientIp:l}; nova tentativa em {RetryAfterSeconds}s")]
+    private static partial void LogLimitExceeded(ILogger logger, string policy, string clientIp, int retryAfterSeconds);
 }

@@ -38,10 +38,15 @@ internal sealed class AccountQueries(AppDbContext dbContext) : IAccountQueries
 
         var total = await entries.CountAsync(cancellationToken);
 
+        // Em long: page * pageSize estoura int em páginas enormes (ex.: page=int.MaxValue).
+        var skip = (long)(page - 1) * pageSize;
+        if (skip >= total)
+            return new PagedResult<StatementEntry>([], page, pageSize, total);
+
         var items = await entries
             .OrderByDescending(t => t.ProcessedAt)
             .ThenByDescending(t => t.EventId) // desempate estável para a paginação
-            .Skip((page - 1) * pageSize)
+            .Skip((int)skip)
             .Take(pageSize)
             .Select(t => new StatementEntry(
                 t.EventId,

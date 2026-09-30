@@ -18,6 +18,7 @@ namespace ServicosFinanceiros.IntegrationTests;
 public class ApiIntegrationTests(PostgresFixture postgres, RedisFixture redis)
 {
     private const int PermitLimit = 3;
+    private const string TrustedProxyIp = "172.18.0.5";
 
     private readonly PostgresFixture _postgres = postgres;
     private readonly RedisFixture _redis = redis;
@@ -32,8 +33,9 @@ public class ApiIntegrationTests(PostgresFixture postgres, RedisFixture redis)
             builder.UseEnvironment("Testing");
             builder.UseSetting("ConnectionStrings:Postgres", _postgres.ConnectionString);
             builder.UseSetting("ConnectionStrings:Redis", _redis.ConnectionString);
-            builder.UseSetting("RateLimiting:Transactions:PermitLimit", PermitLimit.ToString());
+            builder.UseSetting("RateLimiting:Transactions:PermitLimit", PermitLimit.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.UseSetting("RateLimiting:Transactions:WindowSeconds", "60");
+            builder.UseSetting("ReverseProxy:TrustedProxies:0", TrustedProxyIp);
             builder.ConfigureServices(services =>
                 services.AddSingleton<IStartupFilter>(new FixedRemoteIpStartupFilter(IPAddress.Parse(remoteIp))));
         });
@@ -115,27 +117,41 @@ public class ApiIntegrationTests(PostgresFixture postgres, RedisFixture redis)
     [Fact]
     public async Task BehindTrustedProxy_LimitIsPerForwardedClientIp()
     {
-        // A requisição vem do nginx (rede privada do Docker) e o IP real do cliente está no X-Forwarded-For.
-        await using var api = CreateApi("172.18.0.5");
+        // A requisição vem do nginx (proxy configurado como confiável) e o IP real do cliente está no X-Forwarded-For.
+        await using var api = CreateApi(TrustedProxyIp);
         var client = api.CreateClient();
-
-        async Task<HttpStatusCode> PostFrom(string clientIp)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/transactions")
-            {
-                Content = JsonContent.Create(UnknownAccountEvent()),
-            };
-            request.Headers.Add("X-Forwarded-For", clientIp);
-            return (await client.SendAsync(request)).StatusCode;
-        }
 
         var firstClient = RandomPublicIp();
         var secondClient = $"198.51.100.{Random.Shared.Next(1, 255)}";
         for (var i = 0; i < PermitLimit; i++)
-            await PostFrom(firstClient);
+            await PostWithForwardedFor(client, firstClient);
 
-        (await PostFrom(firstClient)).Should().Be(HttpStatusCode.TooManyRequests);
-        (await PostFrom(secondClient)).Should().NotBe(HttpStatusCode.TooManyRequests);
+        (await PostWithForwardedFor(client, firstClient)).Should().Be(HttpStatusCode.TooManyRequests);
+        (await PostWithForwardedFor(client, secondClient)).Should().NotBe(HttpStatusCode.TooManyRequests);
+    }
+
+    [Fact]
+    public async Task DirectCallerFromUntrustedAddress_CannotSpoofForwardedForToEscapeTheLimit()
+    {
+        // Mesma rede privada, mas não é o proxy configurado: um X-Forwarded-For diferente a cada
+        // requisição é ignorado, e o limite continua contado pelo IP de quem conectou.
+        await using var api = CreateApi($"172.18.0.{Random.Shared.Next(100, 200)}");
+        var client = api.CreateClient();
+
+        for (var i = 0; i < PermitLimit; i++)
+            await PostWithForwardedFor(client, RandomPublicIp());
+
+        (await PostWithForwardedFor(client, RandomPublicIp())).Should().Be(HttpStatusCode.TooManyRequests);
+    }
+
+    private static async Task<HttpStatusCode> PostWithForwardedFor(HttpClient client, string forwardedFor)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/transactions")
+        {
+            Content = JsonContent.Create(UnknownAccountEvent()),
+        };
+        request.Headers.Add("X-Forwarded-For", forwardedFor);
+        return (await client.SendAsync(request)).StatusCode;
     }
 
     private sealed class FixedRemoteIpStartupFilter(IPAddress remoteIp) : IStartupFilter

@@ -11,6 +11,9 @@ public sealed class Account
 {
     public const int MoneyScale = 2;
 
+    /// <summary>Maior valor representável em <c>numeric(18,2)</c>, a precisão usada no banco.</summary>
+    public const decimal MaxMoneyValue = 9_999_999_999_999_999.99m;
+
     // Construtor sem parâmetros para materialização pelo EF Core.
     private Account()
     {
@@ -60,6 +63,10 @@ public sealed class Account
         if (type == TransactionType.Debit && amount > Balance)
             throw new InsufficientFundsException(Id, Balance, amount);
 
+        // Sem esta regra, o crédito seria aceito aqui e só falharia no banco (estouro de numeric(18,2)).
+        if (type == TransactionType.Credit && amount > MaxMoneyValue - Balance)
+            throw new InvalidTransactionException("O crédito faria o saldo ultrapassar o limite permitido.");
+
         Balance += type == TransactionType.Credit ? amount : -amount;
 
         return new Transaction(eventId, Id, type, amount, occurredAt, Balance, processedAt);
@@ -75,6 +82,9 @@ public sealed class Account
 
         if (amount <= 0)
             throw new InvalidTransactionException("O valor da transação deve ser maior que zero.");
+
+        if (amount > MaxMoneyValue)
+            throw new InvalidTransactionException("O valor da transação ultrapassa o limite permitido.");
 
         if (decimal.Round(amount, MoneyScale) != amount)
             throw new InvalidTransactionException($"O valor da transação admite no máximo {MoneyScale} casas decimais.");

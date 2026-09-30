@@ -5,7 +5,7 @@ using ServicosFinanceiros.Domain.Exceptions;
 
 namespace ServicosFinanceiros.Application.Transactions;
 
-public sealed class ProcessTransactionHandler(
+public sealed partial class ProcessTransactionHandler(
     IAccountRepository accounts,
     ITransactionRepository transactions,
     IUnitOfWork unitOfWork,
@@ -28,12 +28,7 @@ public sealed class ProcessTransactionHandler(
                 ct => ProcessAsync(command, ct),
                 cancellationToken);
 
-            if (_logger.IsEnabled(LogLevel.Information))
-            {
-                _logger.LogInformation(
-                    "Lançamento {EventId} processado: {TransactionType:l} de {Amount} na conta {AccountId}; saldo após {BalanceAfter}",
-                    transaction.EventId, transaction.Type, transaction.Amount, transaction.AccountId, transaction.BalanceAfter);
-            }
+            LogProcessed(_logger, transaction.EventId, transaction.Type, transaction.Amount, transaction.AccountId, transaction.BalanceAfter);
 
             return transaction;
         }
@@ -63,4 +58,10 @@ public sealed class ProcessTransactionHandler(
         _transactions.Add(transaction);
         return transaction;
     }
+
+    // Registrado só depois do commit: o log nunca afirma um lançamento que não foi gravado.
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Lançamento {EventId} processado: {TransactionType} de {Amount} na conta {AccountId}; saldo após {BalanceAfter}")]
+    private static partial void LogProcessed(
+        ILogger logger, Guid eventId, TransactionType transactionType, decimal amount, Guid accountId, decimal balanceAfter);
 }

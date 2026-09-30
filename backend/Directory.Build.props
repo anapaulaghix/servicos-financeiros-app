@@ -1,0 +1,15 @@
+<Project>
+  <!-- Configuração comum a todos os projetos da solution. -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Analisadores de qualidade do .NET e regras de estilo do .editorconfig verificadas no build. -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- Na CI, qualquer aviso quebra o build (ContinuousIntegrationBuild é definido no workflow). -->
+    <TreatWarningsAsErrors Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

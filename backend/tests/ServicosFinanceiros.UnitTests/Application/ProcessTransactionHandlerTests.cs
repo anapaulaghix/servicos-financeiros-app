@@ -91,7 +91,7 @@ public class ProcessTransactionHandlerTests
             .Setup(u => u.ExecuteInTransactionAsync(
                 It.IsAny<Func<CancellationToken, Task<Transaction>>>(),
                 It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new UniqueConstraintViolationException(new Exception("23505")));
+            .ThrowsAsync(new UniqueConstraintViolationException(new InvalidOperationException("23505")));
 
         var act = () => _handler.HandleAsync(command, CancellationToken.None);
 
