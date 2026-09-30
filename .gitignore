@@ -22,3 +22,6 @@ Thumbs.db
 
 # Enunciado do teste
 *.pdf
+
+# Configurações locais de ferramentas (ex.: assistentes de IA na IDE)
+.qodo/
