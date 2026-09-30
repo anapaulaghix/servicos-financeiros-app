@@ -8,9 +8,9 @@ Motor de um serviço financeiro que recebe eventos de crédito e débito e mant�
 
 - **Como rodar:** `docker compose up --build` (sem configurar nada). Aplicação em http://localhost:4200, Swagger em http://localhost:8080/swagger.
 - **Regras garantidas:** um evento nunca é processado duas vezes (chave primária no `eventId`), o saldo nunca fica negativo (domínio + `CHECK` no banco), lançamento e saldo são gravados na mesma transação e eventos simultâneos na mesma conta são enfileirados (`SELECT ... FOR UPDATE`).
-- **Testes:** 73 no backend (concorrência e contrato HTTP contra PostgreSQL e Redis reais) e 79 no frontend, na CI a cada push.
+- **Testes:** 80 no backend (concorrência e contrato HTTP contra PostgreSQL e Redis reais) e 79 no frontend, na CI a cada push, com cobertura mínima exigida.
 - **Diferenciais feitos:** health checks, logs estruturados (Serilog + Elasticsearch) e rate limiting com Redis. NgRx, Keycloak e RabbitMQ estão [desenhados, não implementados](#melhorias-futuras).
-- **Uso de IA:** o código foi escrito majoritariamente com o Claude Code; as decisões foram minhas ([detalhes](#uso-de-ia-no-desenvolvimento)).
+- **Uso de IA:** parte do código foi escrita com o Claude Code; as decisões foram minhas ([detalhes](#uso-de-ia-no-desenvolvimento)).
 
 > [!IMPORTANT]
 > **Ao testar duplicidade: reenviar o mesmo evento não devolve erro, e isso é proposital.**
@@ -158,11 +158,11 @@ dotnet test backend/ServicosFinanceiros.sln                # integração exige 
 cd frontend/servicos-financeiros && npm install && npm run test:ci
 ```
 
-A CI ([`ci.yml`](.github/workflows/ci.yml)) roda build com avisos como erro, testes de backend (com integração), ESLint, Prettier, testes e build do front, e o build das imagens Docker.
+A CI ([`ci.yml`](.github/workflows/ci.yml)) roda build com avisos como erro, testes de backend (com integração), ESLint, Prettier, testes e build do front, e o build das imagens Docker. Os testes falham se a cobertura ficar abaixo do mínimo (ver abaixo).
 
 > No dia a dia, em ambientes de produção, estou acostumada a escrever pipelines no **Azure Pipelines** (Azure DevOps). Usei o GitHub Actions aqui porque o repositório está no GitHub; as etapas (build, testes, cobertura mínima e imagens Docker) seriam as mesmas num pipeline YAML do Azure.
 
-**O que os testes cobrem:** os principais cenários críticos, com cobertura percentual de mínimo 80% para testes unitários no frontend e backend e 5% para testes integrados no backend (No meu dia a dia, essas são as métricas atuais). No backend, contra PostgreSQL real: 10 eventos idênticos em paralelo gravam exatamente 1; 10 débitos concorrentes de 20 numa conta de 100 permitem só 5; o saldo final é igual à soma do histórico; uma falha ao gravar desfaz o saldo; e o contrato HTTP completo. Removendo o `FOR UPDATE`, os testes de concorrência falham. No frontend: validações do formulário, estados de carregamento/vazio/erro, cada resposta da API (incluindo reenvio, 409, 422, 429 e falha de rede com reuso do `eventId`) e os serviços. Lista completa nos READMEs do [backend](backend/README.md#testes) e do [frontend](frontend/servicos-financeiros/README.md#testes).
+**O que os testes cobrem:** os principais cenários críticos, com cobertura mínima exigida pela CI (a mesma régua que uso no dia a dia): **80%** de linhas e branches nos testes unitários do backend e do frontend e **5%** de linhas nos testes de integração do backend. Hoje: backend unitário ~81% de linhas e ~98% de branches, integração ~93% de linhas, frontend ~98% de linhas e ~90% de branches. No backend, contra PostgreSQL real: 10 eventos idênticos em paralelo gravam exatamente 1; 10 débitos concorrentes de 20 numa conta de 100 permitem só 5; o saldo final é igual à soma do histórico; uma falha ao gravar desfaz o saldo; e o contrato HTTP completo. Removendo o `FOR UPDATE`, os testes de concorrência falham. No frontend: validações do formulário, estados de carregamento/vazio/erro, cada resposta da API (incluindo reenvio, 409, 422, 429 e falha de rede com reuso do `eventId`) e os serviços. Lista completa nos READMEs do [backend](backend/README.md#testes) e do [frontend](frontend/servicos-financeiros/README.md#testes).
 
 ## Diferenciais implementados
 
