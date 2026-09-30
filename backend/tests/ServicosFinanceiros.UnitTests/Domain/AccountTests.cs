@@ -142,6 +142,27 @@ public class AccountTests
     }
 
     [Fact]
+    public void Apply_AmountAboveMoneyLimit_ShouldThrow()
+    {
+        var account = NewAccount();
+
+        var act = () => account.Apply(Guid.NewGuid(), TransactionType.Credit, Account.MaxMoneyValue + 0.01m, Now, Now);
+
+        act.Should().Throw<InvalidTransactionException>();
+    }
+
+    [Fact]
+    public void Apply_CreditThatWouldOverflowTheBalanceLimit_ShouldThrowAndKeepBalance()
+    {
+        var account = AccountWithBalance(Account.MaxMoneyValue);
+
+        var act = () => account.Apply(Guid.NewGuid(), TransactionType.Credit, 0.01m, Now, Now);
+
+        act.Should().Throw<InvalidTransactionException>();
+        account.Balance.Should().Be(Account.MaxMoneyValue);
+    }
+
+    [Fact]
     public void Apply_EmptyEventId_ShouldThrow()
     {
         var account = NewAccount();

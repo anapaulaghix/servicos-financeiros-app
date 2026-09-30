@@ -9,8 +9,20 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
 
+  <!-- Cobertura mínima, aplicada quando os testes rodam com -p:CollectCoverage=true (CI e Docker). -->
+  <PropertyGroup>
+    <Threshold>80</Threshold>
+    <ThresholdType>line,branch</ThresholdType>
+    <ThresholdStat>total</ThresholdStat>
+    <ExcludeByFile>**/*.g.cs</ExcludeByFile>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="coverlet.msbuild" Version="6.0.4">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="FluentAssertions" Version="6.12.2" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />

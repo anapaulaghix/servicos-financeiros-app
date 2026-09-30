@@ -25,3 +25,7 @@ Thumbs.db
 
 # Configurações locais de ferramentas (ex.: assistentes de IA na IDE)
 .qodo/
+
+# Relatórios de cobertura do coverlet
+coverage.json
+coverage.cobertura.xml

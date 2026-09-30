@@ -37,8 +37,10 @@ jobs:
 
       # Os testes de integração sobem PostgreSQL e Redis reais com Testcontainers;
       # o Docker já vem instalado nos runners ubuntu do GitHub.
-      - name: Testes (unitários e de integração)
-        run: dotnet test --no-build --configuration Release --logger "console;verbosity=normal"
+      # Cobertura mínima de linhas definida em cada projeto de teste: 80% nos unitários (também
+      # branches) e 5% nos de integração. Abaixo disso o passo falha.
+      - name: Testes (unitários e de integração) com cobertura mínima
+        run: dotnet test --no-build --configuration Release --logger "console;verbosity=normal" -p:CollectCoverage=true
 
   frontend:
     name: Frontend (Angular) — testes e build
@@ -64,7 +66,7 @@ jobs:
       - name: Formatação (Prettier)
         run: npm run format:check
 
-      - name: Testes (Jasmine + Karma, Chrome headless)
+      - name: Testes (Jasmine + Karma, Chrome headless) com cobertura mínima de 80%
         run: npm run test:ci
 
       - name: Build de produção

@@ -19,7 +19,7 @@ FROM build AS test
 COPY ServicosFinanceiros.sln ./
 COPY tests/ tests/
 RUN dotnet restore ServicosFinanceiros.sln
-CMD ["dotnet", "test", "ServicosFinanceiros.sln", "--no-restore", "--verbosity", "quiet"]
+CMD ["dotnet", "test", "ServicosFinanceiros.sln", "--no-restore", "--verbosity", "quiet", "-p:CollectCoverage=true"]
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app

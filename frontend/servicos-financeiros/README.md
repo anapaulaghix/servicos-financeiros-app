@@ -34,7 +34,7 @@ docker compose up -d db redis api
 | `npm start` | Servidor de desenvolvimento com recarga automática e proxy para a API |
 | `npm run build` | Build de produção em `dist/servicos-financeiros/browser` |
 | `npm test` | Testes em modo observação (abre o Chrome) |
-| `npm run test:ci` | Testes uma vez, em Chrome headless (o que a CI usa) |
+| `npm run test:ci` | Testes uma vez, em Chrome headless, com cobertura mínima de 80% (o que a CI usa) |
 | `npm run lint` | ESLint (regras do Angular, sem `any`, `OnPush` obrigatório) |
 | `npm run format` / `format:check` | Prettier: formata / só verifica |
 
@@ -313,7 +313,7 @@ Para aplicar outra marca, basta alterar dois arquivos: `styles/_tokens.scss` (va
 
 ## Testes
 
-Jasmine + Karma, 79 testes. Rodam em Chrome headless com `npm run test:ci`.
+Jasmine + Karma, 79 testes. Rodam em Chrome headless com `npm run test:ci`, que mede a cobertura e falha abaixo de 80% em statements, branches, funções ou linhas (`check` no `karma.conf.js`); o relatório HTML fica em `coverage/`.
 
 | Arquivo | O que cobre |
 |---|---|
