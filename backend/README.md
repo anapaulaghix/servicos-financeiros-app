@@ -47,13 +47,33 @@ docker compose stop api
 dotnet user-secrets set "ConnectionStrings:Postgres" "Host=localhost;Port=5432;Database=servicos_financeiros;Username=<usuario>;Password=<senha>" --project src/ServicosFinanceiros.Api
 ```
 
-3. Rode a API aplicando as migrations e criando as contas de demonstração:
+3. Rode a API. Os perfis de desenvolvimento (`launchSettings.json`) já aplicam as migrations e criam as contas de demonstração:
 
 ```bash
-dotnet run --project src/ServicosFinanceiros.Api --launch-profile http --urls http://localhost:8080 -- --Database:MigrateOnStartup=true --Database:SeedOnStartup=true
+dotnet run --project src/ServicosFinanceiros.Api --launch-profile http --urls http://localhost:8080
 ```
 
 O Swagger fica em http://localhost:8080/swagger. A porta 8080 é a mesma que o proxy do frontend (`npm start`) espera. Sem a connection string do Redis, o rate limiting fica desligado; isso é intencional para o desenvolvimento local.
+
+### Opção 3: pelo Visual Studio
+
+Requer o **Visual Studio 2026** (versão 18) com a carga de trabalho "Desenvolvimento para ASP.NET e Web": o Visual Studio 2022 não abre projetos .NET 10. VS Code com a extensão C# Dev Kit e JetBrains Rider também funcionam.
+
+1. Suba o banco: `docker compose up -d db` (na raiz do repositório).
+2. Abra `backend/ServicosFinanceiros.sln`.
+3. No Solution Explorer, clique com o botão direito em **ServicosFinanceiros.Api** → **Manage User Secrets** e cole, com o usuário e a senha do seu `.env`:
+
+```json
+{
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Port=5432;Database=servicos_financeiros;Username=<usuario>;Password=<senha>"
+  }
+}
+```
+
+4. Defina **ServicosFinanceiros.Api** como projeto de inicialização, escolha o perfil **http** e rode (F5). O Swagger abre em http://localhost:5077/swagger.
+
+Sem o passo 3, a API encerra na subida com `Connection string 'Postgres' não configurada`. É intencional: nenhuma senha fica no código ou nos `appsettings`. Para usar o frontend com a API rodando pelo Visual Studio, altere o `target` do `frontend/servicos-financeiros/proxy.conf.json` para `http://localhost:5077`, ou use a opção 2, que roda na porta 8080.
 
 ### Comandos úteis
 

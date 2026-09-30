@@ -27,7 +27,9 @@ public static class DependencyInjection
     {
         var connectionString = configuration.GetConnectionString(ConnectionStringName)
             ?? throw new InvalidOperationException(
-                $"Connection string '{ConnectionStringName}' não configurada.");
+                $"Connection string '{ConnectionStringName}' não configurada. Fora do Docker, defina-a por user secrets " +
+                $"(ConnectionStrings:{ConnectionStringName}) ou pela variável de ambiente ConnectionStrings__{ConnectionStringName}. " +
+                "Passo a passo em backend/README.md.");
 
         services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
@@ -50,7 +52,6 @@ public static class DependencyInjection
             services.AddSingleton<IConnectionMultiplexer>(_ =>
             {
                 var options = ConfigurationOptions.Parse(redisConnectionString);
-                // Não derruba a API se o Redis estiver fora do ar na subida; reconecta sozinho depois.
                 options.AbortOnConnectFail = false;
                 return ConnectionMultiplexer.Connect(options);
             });
