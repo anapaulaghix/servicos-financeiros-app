@@ -219,7 +219,7 @@ Trade-off: um pouco mais de cerimônia que Minimal APIs. Com poucos endpoints si
 | `ConnectionStrings:Postgres` | (obrigatória) | Connection string do PostgreSQL. No Docker vem da variável `ConnectionStrings__Postgres`. |
 | `ConnectionStrings:Redis` | vazio | Redis do rate limiting. Vazio = rate limiting desligado. |
 | `Database:MigrateOnStartup` | `false` | Aplica as migrations ao subir (ligado no Docker). |
-| `Database:SeedOnStartup` | `false` | Cria as contas de demonstração, se o banco estiver vazio. |
+| `Database:SeedOnStartup` | `false` | Cria as contas de demonstração, se o banco estiver vazio. **Só tem efeito com `Database:MigrateOnStartup` ligado**: o seed roda logo depois das migrations, na mesma etapa de inicialização (não faz parte delas). Ver [Contas de demonstração](#contas-de-demonstração-seed). |
 | `Swagger:Enabled` | `false` | Liga o Swagger fora do ambiente Development. |
 | `RateLimiting:Transactions:PermitLimit` / `WindowSeconds` | `20` / `10` | Limite de lançamentos por cliente e janela. |
 | `Elasticsearch:Url` | vazio | Envia os logs ao Elasticsearch. Vazio = só console. |
@@ -272,6 +272,26 @@ dotnet ef migrations script -p src/ServicosFinanceiros.Infrastructure -s src/Ser
 ```
 
 A própria Infrastructure é o projeto de *startup* do `dotnet ef` (pela `AppDbContextFactory`), então gerar migrations não depende da API nem de conexão com o banco. No Docker, a API as aplica na subida (`Database:MigrateOnStartup`); em produção, com várias instâncias, o ideal é aplicá-las como etapa separada do deploy.
+
+### Contas de demonstração (seed)
+
+**Por que existe um seed:** o enunciado pede para movimentar e exibir contas já cadastradas. O evento de entrada só informa o `accountId` de uma conta existente, e a tela lista "as contas cadastradas com seus saldos". Criar contas não faz parte do escopo, então não há endpoint nem tela para isso, e o usuário não cria contas. Para a aplicação ter o que mostrar num clone limpo, as contas precisam existir antes do primeiro uso. O seed cumpre esse papel: cria 3 contas com um crédito inicial.
+
+**Como roda:** [`DatabaseInitializer`](src/ServicosFinanceiros.Infrastructure/Persistence/DatabaseInitializer.cs), chamado pelo `Program.cs` na subida, **depois** do `MigrateAsync()`:
+
+1. `Database:MigrateOnStartup` ligado: aplica as migrations (só esquema).
+2. `Database:SeedOnStartup` ligado **e** nenhuma conta no banco: cria as contas com `Account.Open()` e registra o crédito inicial com `Account.Apply()`, num único `SaveChanges`.
+
+No Docker as duas flags vêm ligadas (`SEED_DEMO_DATA=false` desliga o seed); no `appsettings.json` ambas são `false`, e os testes de integração não usam o seed.
+
+**Por que não `InsertData`/`HasData` nas migrations:**
+
+- **Migrations rodam em todos os ambientes.** Dado de demonstração dentro delas chegaria à produção. Separado, o seed é opcional e controlado por configuração.
+- **O seed passa pelas regras do domínio.** O crédito inicial é criado por `Apply()`, então vira um lançamento de verdade no extrato, com `balance_after` coerente: o saldo bate com o histórico desde o primeiro dia. Um `InsertData` gravaria valores direto nas tabelas, sem validação, e um erro de digitação deixaria saldo e extrato divergentes.
+- **Migrations são versionadas e imutáveis.** `HasData` exige valores fixos no código; o seed gera o `eventId` do crédito inicial e usa a data do `TimeProvider` na hora em que roda.
+- **Esquema e dados têm ciclos de vida diferentes.** Mudar ou remover os dados de demonstração não deve exigir uma migration nova.
+
+**Custo:** o seed depende da inicialização da API, e não do `dotnet ef database update`. Quem aplica as migrations por fora (como seria em produção) não recebe as contas, o que é o comportamento desejado.
 
 ## Testes
 
