@@ -5,7 +5,7 @@
 ## Em 1 minuto
 
 - **O que é:** API em .NET 10 que processa créditos e débitos em contas e uma aplicação Angular para consultar saldos, ver o extrato e lançar valores.
-- **Como rodar:** `cp .env.example .env`, defina as senhas e rode `docker compose up --build`. A aplicação abre em http://localhost:4200 e o Swagger em http://localhost:8080/swagger.
+- **Como rodar:** `docker compose up --build` (sem configurar nada: sem `.env`, valem senhas padrão de desenvolvimento local). A aplicação abre em http://localhost:4200 e o Swagger em http://localhost:8080/swagger.
 - **Regras garantidas:** um evento nunca é processado duas vezes (chave primária no `eventId`), o saldo nunca fica negativo, lançamento e saldo são gravados na mesma transação e débitos simultâneos na mesma conta são enfileirados (`SELECT ... FOR UPDATE`). [Detalhes](#regras-de-negócio-e-onde-cada-uma-é-garantida).
 - **Testes:** 61 no backend (incluindo concorrência e o contrato HTTP contra PostgreSQL e Redis reais) e 76 no frontend, rodando na CI a cada push. Também rodam pelo Docker, sem instalar nada: `docker compose --profile test run --rm test-backend` e `... test-frontend`.
 - **Diferenciais feitos:** health checks, logs estruturados (Serilog + Elasticsearch) e rate limiting com Redis. NgRx, Keycloak e RabbitMQ estão desenhados em [Melhorias futuras](#melhorias-futuras).
@@ -170,9 +170,11 @@ O índice composto sustenta o extrato paginado de uma conta, do lançamento mais
 - [.NET SDK 10](https://dotnet.microsoft.com/download) para rodar/testar o backend fora do Docker (o `global.json` fixa a versão).
 - Node.js 20+ e npm para o frontend.
 
-### 1. Crie o seu `.env`
+### 1. (Opcional) Crie o seu `.env`
 
-As credenciais não ficam no repositório: cada pessoa cria o próprio `.env` a partir do modelo, na raiz do projeto. O `.env` está no `.gitignore` e nunca deve ser commitado.
+Para rodar localmente, este passo pode ser pulado: sem `.env`, o Compose usa senhas padrão de desenvolvimento (`app_user` / `dev_only_postgres` e `dev_only_redis`). Elas só servem para a máquina local: o PostgreSQL e a API ficam expostos apenas em `127.0.0.1` e o Redis nem é publicado. Em qualquer outro ambiente, defina credenciais próprias.
+
+Para usar as suas, crie o `.env` a partir do modelo, na raiz do projeto. O `.env` está no `.gitignore` e nunca deve ser commitado.
 
 ```bash
 cp .env.example .env
@@ -182,14 +184,14 @@ Depois, abra o `.env` e troque os valores de exemplo:
 
 | Variável | Obrigatória | Para que serve |
 |---|---|---|
-| `POSTGRES_USER` | Sim | Usuário do PostgreSQL |
-| `POSTGRES_PASSWORD` | Sim | Senha do PostgreSQL |
+| `POSTGRES_USER` | Não (padrão `app_user`) | Usuário do PostgreSQL |
+| `POSTGRES_PASSWORD` | Não (padrão `dev_only_postgres`) | Senha do PostgreSQL |
 | `POSTGRES_DB` | Não (padrão `servicos_financeiros`) | Nome do banco |
-| `REDIS_PASSWORD` | Sim | Senha do Redis, usado pelo rate limiting |
+| `REDIS_PASSWORD` | Não (padrão `dev_only_redis`) | Senha do Redis, usado pelo rate limiting |
 | `SEED_DEMO_DATA` | Não (padrão `true`) | Cria 3 contas de demonstração na primeira subida |
 | `COMPOSE_PROFILES` e `ELASTICSEARCH_URL` | Não | Ligam o Elasticsearch e o Kibana (ver abaixo) |
 
-Se uma variável obrigatória faltar, o `docker compose up` não sobe e informa qual é. Nas senhas, evite `;`, `,` e `"`, porque elas entram em connection strings. Para gerar uma senha aleatória:
+Nas senhas, evite `;`, `,` e `"`, porque elas entram em connection strings. Para gerar uma senha aleatória:
 
 ```bash
 openssl rand -hex 16
@@ -213,7 +215,7 @@ docker compose down -v
 docker compose up --build
 ```
 
-A API sobe em `http://localhost:8080` (Swagger em `/swagger`), aplica as migrations e cria 3 contas de demonstração (`SEED_DEMO_DATA=true`). O compose se recusa a subir se `POSTGRES_USER`, `POSTGRES_PASSWORD` ou `REDIS_PASSWORD` não estiverem definidos.
+A API sobe em `http://localhost:8080` (Swagger em `/swagger`), aplica as migrations e cria 3 contas de demonstração (`SEED_DEMO_DATA=true`).
 
 Para subir também o **Elasticsearch e o Kibana** (cerca de 1,5 GB de RAM a mais), descomente no `.env` as linhas `COMPOSE_PROFILES=observability` e `ELASTICSEARCH_URL=http://elasticsearch:9200`, ou passe-as no comando:
 
@@ -261,9 +263,9 @@ O `web` é o Angular compilado e servido pelo nginx (sem root), que também enca
 
 ### Segredos e configuração
 
-- Credenciais ficam no `.env`, que **não é versionado** (`.gitignore`). Só o `.env.example`, com valores de exemplo, vai para o repositório.
+- Credenciais reais ficam no `.env`, que **não é versionado** (`.gitignore`). Só o `.env.example`, com valores de exemplo, vai para o repositório. Sem `.env`, o `docker-compose.yml` usa senhas padrão (`dev_only_*`), aceitáveis só porque nada sai da máquina local; trocar a conveniência de um `docker compose up` sem preparo por esse padrão é um trade-off consciente.
 - O PostgreSQL é publicado apenas em `127.0.0.1:5432`, então não fica acessível a outras máquinas da rede.
-- A API roda no container com usuário sem privilégios (não é root), e nenhuma senha está no código nem nos `appsettings`.
+- A API roda no container com usuário sem privilégios (não é root), e nenhuma senha está no código nem nos `appsettings` (os únicos valores padrão são os de desenvolvimento do Compose).
 - O Redis exige senha (`REDIS_PASSWORD`) e não tem porta publicada.
 - No Elasticsearch/Kibana a segurança está **desligada**, por ser um ambiente local de demonstração, e as portas ficam restritas a `127.0.0.1`. Em produção: TLS, usuários e API keys.
 - A connection string chega à API pela variável `ConnectionStrings__Postgres`. Para rodar a API fora do Docker (ex.: depurar pela IDE), ela vem de *user secrets*, que ficam fora do repositório; o passo a passo está no [README do backend](backend/README.md#opção-2-api-local-banco-no-docker).
@@ -498,7 +500,7 @@ O [`CLAUDE.md`](CLAUDE.md) na raiz é o "contrato" que usei com o agente: regras
 | **.NET 10 (LTS)** | Para um projeto novo, a versão LTS mais recente: suporte longo e sem migração próxima. |
 | **Controllers em vez de Minimal API** | Organização por recurso, contrato explícito no Swagger e convenção conhecida por times .NET (ver [a seção dedicada](#por-que-controllers-e-não-minimal-api)). |
 | **Clean Architecture com IoC por camada** | Cada camada registra as próprias dependências (`AddApplication()`, `AddInfrastructure()`) e o `Program.cs` só as compõe. Regras testáveis sem banco e dependências com direção garantida. |
-| **Banco e toda a stack no Docker, com credenciais em `.env`** | Ninguém precisa instalar PostgreSQL nem Redis. As senhas ficam num `.env` fora do repositório, o Compose recusa subir sem elas e os serviços internos não são expostos. |
+| **Banco e toda a stack no Docker, com credenciais em `.env` opcional** | Ninguém precisa instalar PostgreSQL nem Redis, e `docker compose up` funciona num clone limpo. Sem `.env`, valem senhas padrão só para desenvolvimento local; credenciais reais ficam num `.env` fora do repositório. O banco e a API só escutam em `127.0.0.1` e o Redis não é publicado. |
 | **PrimeNG e identidade visual modernista** | Aparência de produto de uma empresa, não de um exemplo de biblioteca. Troquei o Angular Material pelo PrimeNG durante o desenvolvimento; como a camada de dados não dependia da biblioteca de UI, a troca afetou só as telas. |
 | **Validação de formulários por diretivas (`shared/input-error`)** | Arquitetura que eu já usava: o componente importa uma diretiva e as mensagens aparecem sozinhas, sem markup de erro nos templates. O agente adaptou ao projeto e corrigiu problemas da versão original (ver o [README do frontend](frontend/servicos-financeiros/README.md#validação-de-formulários-sharedinput-error)). |
 | **`AppComponent` vazio, layout como rota pai** | Deixar lógica e layout na raiz é má prática em projetos reais: dificulta áreas com layouts diferentes e testes isolados. |

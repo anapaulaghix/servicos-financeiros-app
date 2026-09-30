@@ -37,7 +37,7 @@ dotnet test backend/ServicosFinanceiros.sln                  # inclui integraç�
 dotnet test backend/tests/ServicosFinanceiros.UnitTests      # só unitários, sem Docker
 dotnet run --project backend/src/ServicosFinanceiros.Api
 
-# Stack via Docker (exige .env com POSTGRES_USER, POSTGRES_PASSWORD e REDIS_PASSWORD)
+# Stack via Docker (.env opcional; sem ele valem senhas padrão de desenvolvimento local)
 docker compose up --build
 
 # Migrations (a partir de backend/; a ferramenta dotnet-ef está fixada em dotnet-tools.json)

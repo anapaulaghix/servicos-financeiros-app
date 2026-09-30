@@ -22,7 +22,7 @@ A visão geral da solução (arquitetura de ponta a ponta, regras de negócio, t
 
 ### Opção 1: tudo pelo Docker (recomendado)
 
-Na **raiz do repositório**, crie o `.env` a partir do `.env.example` (ver [README da raiz](../README.md#1-crie-o-seu-env)) e rode:
+Na **raiz do repositório**, rode (o `.env` é opcional; sem ele valem senhas padrão de desenvolvimento, ver [README da raiz](../README.md#1-opcional-crie-o-seu-env)):
 
 ```bash
 docker compose up --build
@@ -41,7 +41,7 @@ docker compose up -d db
 docker compose stop api
 ```
 
-2. Informe a connection string por *user secrets*, que ficam fora do repositório (use o usuário e a senha do seu `.env`):
+2. Informe a connection string por *user secrets*, que ficam fora do repositório (use o usuário e a senha do seu `.env` ou, sem ele, `app_user` / `dev_only_postgres`):
 
 ```bash
 dotnet user-secrets set "ConnectionStrings:Postgres" "Host=localhost;Port=5432;Database=servicos_financeiros;Username=<usuario>;Password=<senha>" --project src/ServicosFinanceiros.Api
@@ -61,7 +61,7 @@ Requer o **Visual Studio 2026** (versão 18) com a carga de trabalho "Desenvolvi
 
 1. Suba o banco: `docker compose up -d db` (na raiz do repositório).
 2. Abra `backend/ServicosFinanceiros.sln`.
-3. No Solution Explorer, clique com o botão direito em **ServicosFinanceiros.Api** → **Manage User Secrets** e cole, com o usuário e a senha do seu `.env`:
+3. No Solution Explorer, clique com o botão direito em **ServicosFinanceiros.Api** → **Manage User Secrets** e cole, com o usuário e a senha do seu `.env` (sem ele, `app_user` / `dev_only_postgres`):
 
 ```json
 {
