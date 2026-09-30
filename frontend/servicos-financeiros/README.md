@@ -11,6 +11,7 @@ A visão geral da solução (arquitetura de ponta a ponta, regras de negócio, t
 - [Fluxo de dados](#fluxo-de-dados)
 - [Validação de formulários: `shared/input-error`](#validação-de-formulários-sharedinput-error)
 - [Tema e estilos](#tema-e-estilos)
+- [Decisões e trade-offs](#decisões-e-trade-offs)
 - [Testes](#testes)
 
 ## Como rodar
@@ -297,6 +298,19 @@ A identidade visual é modernista: grade rígida, tipografia grande (Archivo), n
 
 Para aplicar outra marca, basta alterar dois arquivos: `styles/_tokens.scss` (variáveis CSS) e `theme/app-preset.ts` (preset do PrimeNG).
 
+## Decisões e trade-offs
+
+- **Idempotência por baixo dos panos.** O `IdempotencyKeyTracker` reutiliza o `eventId` enquanto o usuário reenvia exatamente os mesmos dados de uma tentativa sem confirmação (rede caiu, erro 5xx). Se a primeira chegou ao servidor, a API devolve o lançamento original (200 com `Idempotent-Replayed`), mostrado como "Lançamento já registrado". Qualquer mudança nos dados, ou uma resposta definitiva (sucesso, reenvio ou 409), gera chave nova. Custo: a chave vive só em memória; recarregar a página após uma falha de rede a perde (`sessionStorage` fecharia a brecha).
+- **Backend como fonte da verdade.** O formulário valida e mostra a prévia do saldo, inclusive o aviso de débito acima do saldo, mas não bloqueia o envio. A prévia usa o saldo carregado na tela e pode estar desatualizada se houver outro lançamento em paralelo; os saldos são recarregados da API após cada lançamento.
+- **Dinheiro como `number`.** Os valores só são exibidos ou usados na prévia (arredondada a 2 casas); nenhum cálculo financeiro acontece no front.
+- **Sem gerência de estado global.** Cada tela busca os próprios dados; um store (NgRx SignalStore) passaria a valer se várias telas compartilhassem os saldos.
+- **Extrato sem piscar:** a tabela mantém a página anterior enquanto a próxima carrega. **Mobile:** a barra lateral vira cabeçalho e o extrato mostra só data, valor e saldo.
+- **Sem SSR.** Removido do `ng new`: um painel sem SEO não se beneficia dele, e ele acrescentaria um servidor Node ao Docker.
+- **PrimeNG:** componentes prontos e acessíveis, ao custo de um bundle inicial maior (~495 kB, ~120 kB comprimido).
+- **Proxy de `/api` no nginx:** elimina CORS e URLs por ambiente, mas exige a API atrás do mesmo host.
+- **Google Fonts:** dependência externa em tempo de execução e motivo de não haver Content-Security-Policy; hospedar as fontes localmente permitiria fechá-la.
+- **Angular 19:** já fora do suporte oficial. Escolhi por ser a versão que estou acostumada nos meus projetos produtivos e com muitos usuários. 
+
 ## Testes
 
 Jasmine + Karma, 79 testes. Rodam em Chrome headless com `npm run test:ci`.
@@ -312,3 +326,4 @@ Jasmine + Karma, 79 testes. Rodam em Chrome headless com `npm run test:ci`.
 | `shared/input-error/**/*.spec.ts` | Ver [testes da validação](#testes-da-validação). |
 
 Os testes de formulário dirigem os campos pelo modelo (`form.patchValue`) e verificam o DOM resultante. Testar cliques dentro dos componentes do PrimeNG testaria a biblioteca, não a lógica do projeto.
+OBS: possuo o conhecimento em Jest para testes, mas estou habituada ao Jamsine + Karma no Angular.

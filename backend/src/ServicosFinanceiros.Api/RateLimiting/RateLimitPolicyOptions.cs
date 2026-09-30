@@ -6,8 +6,7 @@ public sealed class RateLimitPolicyOptions
 {
     public const string SectionName = "RateLimiting";
     public const string Transactions = "Transactions";
-
-    /// <summary>Requisições permitidas por cliente em cada janela.</summary>
+    
     [Range(1, int.MaxValue)]
     public int PermitLimit { get; init; } = 20;
 

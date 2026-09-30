@@ -8,7 +8,6 @@ namespace ServicosFinanceiros.Api.Observability;
 
 public static class HealthCheckEndpoints
 {
-    // Resposta JSON (nunca HTML): o escape relaxado só deixa os acentos legíveis ("Latência").
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,

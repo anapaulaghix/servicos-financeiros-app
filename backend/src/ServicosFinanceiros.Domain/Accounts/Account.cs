@@ -14,7 +14,6 @@ public sealed class Account
     /// <summary>Maior valor representável em <c>numeric(18,2)</c>, a precisão usada no banco.</summary>
     public const decimal MaxMoneyValue = 9_999_999_999_999_999.99m;
 
-    // Construtor sem parâmetros para materialização pelo EF Core.
     private Account()
     {
         HolderName = string.Empty;
@@ -62,8 +61,7 @@ public sealed class Account
 
         if (type == TransactionType.Debit && amount > Balance)
             throw new InsufficientFundsException(Id, Balance, amount);
-
-        // Sem esta regra, o crédito seria aceito aqui e só falharia no banco (estouro de numeric(18,2)).
+            
         if (type == TransactionType.Credit && amount > MaxMoneyValue - Balance)
             throw new InvalidTransactionException("O crédito faria o saldo ultrapassar o limite permitido.");
 

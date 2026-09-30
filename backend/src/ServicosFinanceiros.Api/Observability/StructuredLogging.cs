@@ -44,8 +44,6 @@ public static class StructuredLogging
                 logger.WriteTo.Elasticsearch([new Uri(elasticsearchUrl)], options =>
                 {
                     options.DataStream = new DataStreamName("logs", "servicos_financeiros", "api");
-                    // Elasticsearch fora do ar não impede a API de subir; os eventos são descartados
-                    // após as tentativas do buffer, e o console continua recebendo tudo.
                     options.BootstrapMethod = BootstrapMethod.Silent;
                 });
             }
@@ -59,7 +57,6 @@ public static class StructuredLogging
     {
         return app.UseSerilogRequestLogging(options =>
         {
-            // Health checks são chamados o tempo todo por orquestradores: não poluem os logs.
             options.GetLevel = (context, _, exception) =>
                 exception is not null || context.Response.StatusCode >= 500 ? LogEventLevel.Error
                 : context.Request.Path.StartsWithSegments("/health") ? LogEventLevel.Verbose

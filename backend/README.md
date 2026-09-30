@@ -9,7 +9,9 @@ A visão geral da solução (arquitetura de ponta a ponta, regras de negócio, t
 - [Como rodar](#como-rodar)
 - [Estrutura de pastas](#estrutura-de-pastas)
 - [Caminho de uma requisição](#caminho-de-uma-requisição)
+- [Por que Controllers e não Minimal API](#por-que-controllers-e-não-minimal-api)
 - [Configuração](#configuração)
+- [Observabilidade e rate limiting](#observabilidade-e-rate-limiting)
 - [Migrations](#migrations)
 - [Testes](#testes)
 
@@ -22,7 +24,7 @@ A visão geral da solução (arquitetura de ponta a ponta, regras de negócio, t
 
 ### Opção 1: tudo pelo Docker (recomendado)
 
-Na **raiz do repositório**, rode (o `.env` é opcional; sem ele valem senhas padrão de desenvolvimento, ver [README da raiz](../README.md#1-opcional-crie-o-seu-env)):
+Na **raiz do repositório**, rode (o `.env` é opcional; sem ele valem senhas padrão de desenvolvimento, ver [README da raiz](../README.md#como-rodar)):
 
 ```bash
 docker compose up --build
@@ -198,6 +200,18 @@ O **Domain** não referencia nenhum outro projeto nem framework. A **Application
    4. o lançamento é adicionado; um único `SaveChanges` grava lançamento e saldo; commit. Se outra requisição com o mesmo `eventId` gravou antes, a chave primária recusa esta, e o caso de uso volta ao passo 1 com o lançamento vencedor.
 4. **Resposta:** 201 com o lançamento e o `balanceAfter`. Se alguma regra foi violada, o `DomainExceptionHandler` responde com o `ProblemDetails` correspondente e nada foi gravado.
 
+O lado de leitura usa portas próprias (`IAccountQueries`, `ITransactionQueries`) com projeções `AsNoTracking` para modelos de leitura, sem carregar entidades de domínio (um CQRS leve).
+
+**Regras do contrato:** todos os campos são obrigatórios e validados antes de qualquer acesso ao banco. `occurredAt` aceita qualquer fuso ISO-8601 e é armazenado em UTC. O `type` só é aceito como texto (`"CREDIT"`/`"DEBIT"`). Um crédito que faria o saldo passar do limite de `numeric(18,2)` é recusado com 400. Os campos do contrato são anuláveis de propósito: em tipos de valor, o `[Required]` não detecta um campo ausente, que viraria o valor padrão (ex.: data `0001-01-01`).
+
+## Por que Controllers e não Minimal API
+
+- **Organização por recurso:** um controller por recurso (transações, contas) mantém rotas, contratos e documentação agrupados, sem inflar o `Program.cs`.
+- **Contrato declarativo:** `[ApiController]` devolve 400 com `ValidationProblemDetails` automaticamente, e `[ProducesResponseType]` + comentários XML documentam no Swagger todos os códigos possíveis.
+- **Convenção conhecida** por times .NET, o que reduz o custo de leitura para quem for manter.
+
+Trade-off: um pouco mais de cerimônia que Minimal APIs. Com poucos endpoints simples, Minimal API seria igualmente defensável.
+
 ## Configuração
 
 | Chave | Padrão | Descrição |
@@ -214,6 +228,36 @@ O **Domain** não referencia nenhum outro projeto nem framework. A **Application
 
 Qualquer chave pode vir por variável de ambiente trocando `:` por `__` (ex.: `RateLimiting__Transactions__PermitLimit=50`).
 
+**Segredos:** nenhuma senha fica no código nem nos `appsettings`. No Docker, as credenciais vêm do `.env` (não versionado; modelo em `.env.example`) ou, sem ele, de senhas `dev_only_*` aceitáveis só porque nada sai da máquina local: o PostgreSQL e a API são publicados só em `127.0.0.1`, o Redis exige senha e não tem porta publicada, e a API roda no container sem root. Nas senhas do `.env`, evite `;`, `,` e `"`, que entram em connection strings (`openssl rand -hex 16` gera uma adequada). No Elasticsearch/Kibana a segurança está desligada por ser ambiente local de demonstração; em produção: TLS, usuários e API keys.
+
+## Observabilidade e rate limiting
+
+### Health checks
+
+| Endpoint | O que verifica | Para que serve |
+|---|---|---|
+| `GET /health/live` | Só se o processo responde | *Liveness*: se falhar, o orquestrador reinicia a instância |
+| `GET /health/ready` | PostgreSQL (`AddDbContextCheck`) e Redis (`PING`) | *Readiness*: se falhar, a instância sai do balanceamento sem ser reiniciada |
+
+Reiniciar a API não conserta o banco, por isso os dois são separados. O Redis fora do ar deixa o readiness como **Degraded**, e não **Unhealthy**, porque a API continua processando lançamentos sem ele.
+
+### Logs estruturados (Serilog)
+
+- Eventos com propriedades (`EventId`, `AccountId`, `Rejection`, `StatusCode`), que viram campos pesquisáveis no Elasticsearch ("quantos saldos insuficientes na última hora?").
+- Texto legível em desenvolvimento; JSON de uma linha por evento no container.
+- Com `Elasticsearch:Url` configurado, os eventos vão para o data stream `logs-servicos_financeiros-api`. Se o Elasticsearch cair, a API segue logando no console.
+- Cada evento carrega `TraceId` e `SpanId` da requisição.
+- É logada uma linha por requisição HTTP, cada lançamento (só depois do commit) e cada recusa de regra de negócio como `Information`, já que recusar é comportamento esperado. Health checks ficam de fora. O nome do titular não é logado.
+
+### Rate limiting com Redis
+
+- `POST /api/transactions`: 20 requisições a cada 10 segundos por cliente (`RateLimiting:Transactions`). Acima disso, 429 com `ProblemDetails` e `Retry-After`. Leituras não são limitadas.
+- **Redis, e não o limitador em memória do ASP.NET:** em memória, cada instância teria o próprio contador.
+- **Atômico:** `INCR` e `PEXPIRE` num único script Lua (há teste com 50 requisições paralelas contra limite 10).
+- **Fail-open:** se o Redis cair, a API permite as requisições e registra um aviso, em vez de bloquear lançamentos por causa de uma proteção auxiliar.
+- **IP real do cliente:** vem do `X-Forwarded-For`, aceito só do nginx (IP fixo na rede do Compose, `ReverseProxy:TrustedProxies`). Quem chama a API direto não consegue forjar o IP (há teste).
+- **Trade-offs:** janela fixa permite até 2× o limite na virada da janela (token bucket seria mais preciso); limite por IP faz clientes atrás do mesmo NAT dividirem o limite; o Redis não tem persistência, então reiniciá-lo só zera as janelas em andamento.
+
 ## Migrations
 
 ```bash
@@ -227,7 +271,7 @@ Para ver o SQL que será executado:
 dotnet ef migrations script -p src/ServicosFinanceiros.Infrastructure -s src/ServicosFinanceiros.Infrastructure
 ```
 
-A própria Infrastructure é o projeto de *startup* do `dotnet ef` (pela `AppDbContextFactory`), então gerar migrations não depende da API nem de conexão com o banco.
+A própria Infrastructure é o projeto de *startup* do `dotnet ef` (pela `AppDbContextFactory`), então gerar migrations não depende da API nem de conexão com o banco. No Docker, a API as aplica na subida (`Database:MigrateOnStartup`); em produção, com várias instâncias, o ideal é aplicá-las como etapa separada do deploy.
 
 ## Testes
 

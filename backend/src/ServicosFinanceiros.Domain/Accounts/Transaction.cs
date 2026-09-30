@@ -6,7 +6,6 @@ namespace ServicosFinanceiros.Domain.Accounts;
 /// </summary>
 public sealed class Transaction
 {
-    // Construtor sem parâmetros para materialização pelo EF Core.
     private Transaction()
     {
     }
