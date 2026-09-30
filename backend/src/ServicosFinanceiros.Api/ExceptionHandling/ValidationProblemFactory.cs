@@ -30,6 +30,14 @@ public static class ValidationProblemFactory
                 .ToArray();
         }
 
+        // Um campo com formato errado faz o ASP.NET também acusar o corpo inteiro ("request"); se há
+        // erro em algum campo específico, só ele é mostrado, para não sugerir que o corpo está ausente.
+        if (errors.Keys.Any(key => !IsBodyKey(key)))
+        {
+            foreach (var key in errors.Keys.Where(IsBodyKey).ToList())
+                errors.Remove(key);
+        }
+
         var problem = new ValidationProblemDetails(errors)
         {
             Status = StatusCodes.Status400BadRequest,
@@ -43,6 +51,8 @@ public static class ValidationProblemFactory
         };
     }
 
+    private static bool IsBodyKey(string field) => field is "request" or "$" or "";
+
     // "$.type" (erro do desserializador) e "Type" (erro de validação) viram "type", como no contrato JSON.
     private static string NormalizeKey(string key)
     {
@@ -53,7 +63,7 @@ public static class ValidationProblemFactory
     private static string Translate(string field, ModelError error)
     {
         // Corpo ausente ou JSON quebrado: o erro chega no parâmetro da action ("request") ou na raiz ("$").
-        if (field is "request" or "$" or "")
+        if (IsBodyKey(field))
             return MissingBodyMessage;
 
         // Erros do desserializador (tipo errado, valor fora do enum) trazem a exceção ou a mensagem

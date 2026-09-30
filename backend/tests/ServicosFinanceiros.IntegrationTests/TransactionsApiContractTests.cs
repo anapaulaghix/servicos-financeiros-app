@@ -151,6 +151,9 @@ public class TransactionsApiContractTests(PostgresFixture postgres) : IAsyncLife
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         raw.Should().NotContain("ServicosFinanceiros");
         raw.Should().Contain("formato inválido");
+        // O erro é do campo "type"; o corpo em si não está ausente.
+        (await JsonOf(response)).GetProperty("errors").EnumerateObject().Select(e => e.Name)
+            .Should().Equal("type");
     }
 
     [Fact]

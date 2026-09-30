@@ -30,8 +30,10 @@ jobs:
       - name: Restaurar dependências
         run: dotnet restore
 
-      - name: Build
-        run: dotnet build --no-restore --configuration Release
+      # ContinuousIntegrationBuild liga TreatWarningsAsErrors (Directory.Build.props): qualquer aviso
+      # dos analisadores ou do .editorconfig quebra o build.
+      - name: Build (analisadores e estilo, avisos viram erro)
+        run: dotnet build --no-restore --configuration Release -p:ContinuousIntegrationBuild=true
 
       # Os testes de integração sobem PostgreSQL e Redis reais com Testcontainers;
       # o Docker já vem instalado nos runners ubuntu do GitHub.
@@ -55,6 +57,12 @@ jobs:
 
       - name: Instalar dependências
         run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Formatação (Prettier)
+        run: npm run format:check
 
       - name: Testes (Jasmine + Karma, Chrome headless)
         run: npm run test:ci

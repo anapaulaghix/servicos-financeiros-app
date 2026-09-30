@@ -33,6 +33,7 @@ services:
   api:
     build:
       context: ./backend
+      target: runtime
     depends_on:
       db:
         condition: service_healthy
@@ -46,16 +47,47 @@ services:
       Swagger__Enabled: "true"
       # Vazio = logs só no console. Com o profile "observability" ativo, aponte para o Elasticsearch.
       Elasticsearch__Url: ${ELASTICSEARCH_URL:-}
+      # Único proxy autorizado a informar o IP do cliente (X-Forwarded-For): o nginx do serviço web.
+      ReverseProxy__TrustedProxies__0: 172.28.0.10
     ports:
-      - "8080:8080"
+      # Swagger e chamadas diretas só a partir desta máquina; o acesso normal passa pelo web (nginx).
+      - "127.0.0.1:8080:8080"
 
   web:
     build:
       context: ./frontend/servicos-financeiros
+      target: runtime
     depends_on:
       - api
     ports:
       - "4200:8080"
+    networks:
+      default:
+        # IP fixo para a API poder confiar só neste proxy (ReverseProxy__TrustedProxies__0).
+        ipv4_address: 172.28.0.10
+
+  # --- Testes (profile "test"): rodam em containers, sem .NET, Node ou Chrome na máquina. ---
+  #   docker compose --profile test run --rm test-backend
+  #   docker compose --profile test run --rm test-frontend
+  # Os testes de integração do backend sobem PostgreSQL e Redis com Testcontainers, usando o
+  # Docker do host pelo socket montado; os containers criados por eles são descartados ao final.
+  test-backend:
+    build:
+      context: ./backend
+      target: test
+    profiles: ["test"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  test-frontend:
+    build:
+      context: ./frontend/servicos-financeiros
+      target: test
+    profiles: ["test"]
 
   # --- Observabilidade (opcional): sobe só com o profile "observability" (veja .env.example). ---
   # Segurança do Elasticsearch desligada por ser um ambiente local de demonstração; as portas
@@ -87,6 +119,12 @@ services:
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
     ports:
       - "127.0.0.1:5601:5601"
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
 
 volumes:
   pgdata:

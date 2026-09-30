@@ -3,6 +3,6 @@
 **/.vs/
 **/.env
 **/.env.*
-tests/
+**/TestResults/
 Dockerfile
 .dockerignore
