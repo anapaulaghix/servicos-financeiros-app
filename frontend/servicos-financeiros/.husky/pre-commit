@@ -1,0 +1,2 @@
+cd frontend/servicos-financeiros
+npx lint-staged

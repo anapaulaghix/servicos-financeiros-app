@@ -160,6 +160,8 @@ cd frontend/servicos-financeiros && npm install && npm run test:ci
 
 A CI ([`ci.yml`](.github/workflows/ci.yml)) roda build com avisos como erro, testes de backend (com integração), ESLint, Prettier, testes e build do front, e o build das imagens Docker.
 
+> No dia a dia, em ambientes de produção, estou acostumada a escrever pipelines no **Azure Pipelines** (Azure DevOps). Usei o GitHub Actions aqui porque o repositório está no GitHub; as etapas (build, testes, cobertura mínima e imagens Docker) seriam as mesmas num pipeline YAML do Azure.
+
 **O que os testes cobrem:** os principais cenários críticos, com cobertura percentual de mínimo 80% para testes unitários no frontend e backend e 5% para testes integrados no backend (No meu dia a dia, essas são as métricas atuais). No backend, contra PostgreSQL real: 10 eventos idênticos em paralelo gravam exatamente 1; 10 débitos concorrentes de 20 numa conta de 100 permitem só 5; o saldo final é igual à soma do histórico; uma falha ao gravar desfaz o saldo; e o contrato HTTP completo. Removendo o `FOR UPDATE`, os testes de concorrência falham. No frontend: validações do formulário, estados de carregamento/vazio/erro, cada resposta da API (incluindo reenvio, 409, 422, 429 e falha de rede com reuso do `eventId`) e os serviços. Lista completa nos READMEs do [backend](backend/README.md#testes) e do [frontend](frontend/servicos-financeiros/README.md#testes).
 
 ## Diferenciais implementados

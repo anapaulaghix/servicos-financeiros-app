@@ -10,7 +10,16 @@
     "test:ci": "ng test --watch=false --browsers=ChromeHeadlessCI --code-coverage",
     "lint": "ng lint",
     "format": "prettier --write \"src/**/*.{ts,html,scss,json}\" \"*.{js,json}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,html,scss,json}\" \"*.{js,json}\""
+    "format:check": "prettier --check \"src/**/*.{ts,html,scss,json}\" \"*.{js,json}\"",
+    "prepare": "cd ../.. && husky frontend/servicos-financeiros/.husky || true"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,html}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "src/**/*.{scss,json}": "prettier --write",
+    "*.{js,json}": "prettier --write"
   },
   "private": true,
   "dependencies": {
@@ -36,12 +45,14 @@
     "angular-eslint": "19.8.1",
     "eslint": "^9.28.0",
     "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
     "jasmine-core": "~5.6.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.2.0",
     "karma-coverage": "~2.2.0",
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.9.9",
     "typescript": "~5.7.2",
     "typescript-eslint": "8.33.1"

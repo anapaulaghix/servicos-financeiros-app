@@ -38,6 +38,10 @@ docker compose up -d db redis api
 | `npm run lint` | ESLint (regras do Angular, sem `any`, `OnPush` obrigatório) |
 | `npm run format` / `format:check` | Prettier: formata / só verifica |
 
+**Lint no commit:** o `npm install` ativa um hook de `pre-commit` (Husky) que roda o ESLint (`--fix`) e o Prettier só nos arquivos do front que estão no commit (lint-staged). O que não for corrigível automaticamente bloqueia o commit. O hook pode ser pulado com `--no-verify`, por isso a CI continua sendo a garantia.
+
+**Lembrete:** essas ferramentas de verificação e validação de qualidade de código como ESLint, Prettier e Husky são ferramentas que utilizo no meu dia a dia.
+
 Sem Node ou Chrome instalados, os testes rodam pelo Docker, na raiz do repositório: `docker compose --profile test run --rm test-frontend`.
 
 No Docker, o `Dockerfile` compila o app e o serve com **nginx sem root**; o `nginx.conf` faz o fallback de rotas do Angular e o proxy de `/api` para a API.
