@@ -22,6 +22,7 @@ O enunciado original (PDF) não é versionado.
 - Observabilidade e proteção: health checks (`/health/live`, `/health/ready`), Serilog (`Api/Observability`), rate limiting com Redis (`Infrastructure/RateLimiting` + `Api/RateLimiting`, aplicado com `[RateLimit(...)]`, fail-open)
 - Fora do escopo (documentados como melhorias futuras no README): NgRx, Keycloak, RabbitMQ
 - `.env` (não versionado) guarda as credenciais; `.env.example` é o modelo
+- `.github/workflows/ci.yml` — CI: build e testes do backend (com integração) e do frontend, e build das imagens Docker
 
 Dependências entre camadas: Api → Application/Infrastructure; Infrastructure → Application → Domain.
 O Domain não referencia nenhuma outra camada.

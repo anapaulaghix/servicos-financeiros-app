@@ -1,5 +1,18 @@
 # Serviços Financeiros
 
+[![CI](https://github.com/anapaulaghix/servicos-financeiros-app/actions/workflows/ci.yml/badge.svg)](https://github.com/anapaulaghix/servicos-financeiros-app/actions/workflows/ci.yml)
+
+## Em 1 minuto
+
+- **O que é:** API em .NET 10 que processa créditos e débitos em contas e uma aplicação Angular para consultar saldos, ver o extrato e lançar valores.
+- **Como rodar:** `cp .env.example .env`, defina as senhas e rode `docker compose up --build`. A aplicação abre em http://localhost:4200 e o Swagger em http://localhost:8080/swagger.
+- **Regras garantidas:** um evento nunca é processado duas vezes (chave primária no `eventId`), o saldo nunca fica negativo, lançamento e saldo são gravados na mesma transação e débitos simultâneos na mesma conta são enfileirados (`SELECT ... FOR UPDATE`). [Detalhes](#regras-de-negócio-e-onde-cada-uma-é-garantida).
+- **Testes:** 45 no backend (incluindo concorrência contra PostgreSQL e Redis reais) e 75 no frontend, rodando na CI a cada push.
+- **Diferenciais feitos:** health checks, logs estruturados (Serilog + Elasticsearch) e rate limiting com Redis. NgRx, Keycloak e RabbitMQ estão desenhados em [Melhorias futuras](#melhorias-futuras).
+- **Onde estão as decisões:** [Decisões e trade-offs](#decisões-e-trade-offs) e [Uso de IA no desenvolvimento](#uso-de-ia-no-desenvolvimento).
+
+## Visão geral
+
 Motor de um serviço financeiro que recebe eventos de crédito e débito e mantém o saldo consolidado de contas bancárias. Monorepo com:
 
 - **`backend/`** — API REST em C# / ASP.NET Core (.NET 10, LTS), PostgreSQL via EF Core.
@@ -250,6 +263,16 @@ dotnet ef migrations add <Nome> -p src/ServicosFinanceiros.Infrastructure -s src
 
 Gerar migrations não abre conexão com o banco (usa um `IDesignTimeDbContextFactory`). Nos ambientes Docker/desenvolvimento a API as aplica na inicialização (`Database__MigrateOnStartup`); em produção o ideal é aplicá-las como etapa separada do deploy.
 
+### Integração contínua
+
+A CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) roda a cada push e pull request na `main`, em três jobs:
+
+| Job | O que faz |
+|---|---|
+| **Backend** | `dotnet build` e `dotnet test` em Release, incluindo os testes de integração (o runner do GitHub já tem Docker para o Testcontainers). |
+| **Frontend** | `npm ci`, testes em Chrome headless e build de produção. |
+| **Docker** | Valida o `docker-compose.yml` e constrói as imagens da API e do frontend. Roda só se os dois anteriores passarem. |
+
 ### Testes do backend
 
 ```bash
@@ -477,6 +500,7 @@ Desliguei a linha `Co-Authored-By` automática nos commits para manter o histór
 | Rate limiting com Redis | Feito, com testes (diferencial) |
 | Gerência de estado (NgRx), autenticação (Keycloak), mensageria (RabbitMQ) | Melhorias futuras (abaixo) |
 | Criação de contas pela API/tela | Não feito (as contas de demonstração vêm do seed) |
+| CI no GitHub Actions (build, testes e imagens Docker) | Feito |
 | Testes end-to-end (navegador automatizado) | Não feito |
 
 ## Melhorias futuras
