@@ -8,14 +8,9 @@ namespace ServicosFinanceiros.Api.Controllers;
 [ApiController]
 [Route("api/accounts")]
 [Produces("application/json")]
-public sealed class AccountsController : ControllerBase
+public sealed class AccountsController(IAccountQueries queries) : ControllerBase
 {
-    private readonly IAccountQueries _queries;
-
-    public AccountsController(IAccountQueries queries)
-    {
-        _queries = queries;
-    }
+    private readonly IAccountQueries _queries = queries;
 
     /// <summary>Lista as contas com o saldo atual consolidado.</summary>
     [HttpGet]

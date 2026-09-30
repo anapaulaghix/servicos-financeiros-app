@@ -12,7 +12,6 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddStructuredLogging();
 
-// Composição de dependências: cada camada expõe seu próprio registro.
 builder.Services
     .AddApplication()
     .AddInfrastructure(builder.Configuration);
@@ -32,8 +31,6 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-// A API fica atrás do nginx: o IP do cliente chega em X-Forwarded-For. Só redes privadas (a rede
-// do Docker) são confiáveis como proxy, para ninguém forjar o próprio IP de fora e burlar o limite.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
@@ -75,5 +72,4 @@ app.MapControllers();
 
 app.Run();
 
-/// <summary>Exposto para os testes de integração da API (WebApplicationFactory).</summary>
 public partial class Program;

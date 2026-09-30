@@ -7,14 +7,9 @@ using ServicosFinanceiros.Domain.Accounts;
 namespace ServicosFinanceiros.IntegrationTests;
 
 [Collection(PostgresCollection.Name)]
-public class AccountQueriesIntegrationTests
+public class AccountQueriesIntegrationTests(PostgresFixture fixture)
 {
-    private readonly PostgresFixture _fixture;
-
-    public AccountQueriesIntegrationTests(PostgresFixture fixture)
-    {
-        _fixture = fixture;
-    }
+    private readonly PostgresFixture _fixture = fixture;
 
     private async Task ProcessAsync(Guid accountId, TransactionType type, decimal amount)
     {

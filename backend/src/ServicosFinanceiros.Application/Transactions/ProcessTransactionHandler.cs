@@ -5,27 +5,18 @@ using ServicosFinanceiros.Domain.Exceptions;
 
 namespace ServicosFinanceiros.Application.Transactions;
 
-public sealed class ProcessTransactionHandler : IProcessTransactionHandler
+public sealed class ProcessTransactionHandler(
+    IAccountRepository accounts,
+    ITransactionRepository transactions,
+    IUnitOfWork unitOfWork,
+    TimeProvider timeProvider,
+    ILogger<ProcessTransactionHandler> logger) : IProcessTransactionHandler
 {
-    private readonly IAccountRepository _accounts;
-    private readonly ITransactionRepository _transactions;
-    private readonly IUnitOfWork _unitOfWork;
-    private readonly TimeProvider _timeProvider;
-    private readonly ILogger<ProcessTransactionHandler> _logger;
-
-    public ProcessTransactionHandler(
-        IAccountRepository accounts,
-        ITransactionRepository transactions,
-        IUnitOfWork unitOfWork,
-        TimeProvider timeProvider,
-        ILogger<ProcessTransactionHandler> logger)
-    {
-        _accounts = accounts;
-        _transactions = transactions;
-        _unitOfWork = unitOfWork;
-        _timeProvider = timeProvider;
-        _logger = logger;
-    }
+    private readonly IAccountRepository _accounts = accounts;
+    private readonly ITransactionRepository _transactions = transactions;
+    private readonly IUnitOfWork _unitOfWork = unitOfWork;
+    private readonly TimeProvider _timeProvider = timeProvider;
+    private readonly ILogger<ProcessTransactionHandler> _logger = logger;
 
     public async Task<Transaction> HandleAsync(
         ProcessTransactionCommand command,
@@ -37,10 +28,12 @@ public sealed class ProcessTransactionHandler : IProcessTransactionHandler
                 ct => ProcessAsync(command, ct),
                 cancellationToken);
 
-            // Registrado só depois do commit: o log nunca afirma um lançamento que não foi gravado.
-            _logger.LogInformation(
-                "Lançamento {EventId} processado: {TransactionType:l} de {Amount} na conta {AccountId}; saldo após {BalanceAfter}",
-                transaction.EventId, transaction.Type, transaction.Amount, transaction.AccountId, transaction.BalanceAfter);
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "Lançamento {EventId} processado: {TransactionType:l} de {Amount} na conta {AccountId}; saldo após {BalanceAfter}",
+                    transaction.EventId, transaction.Type, transaction.Amount, transaction.AccountId, transaction.BalanceAfter);
+            }
 
             return transaction;
         }

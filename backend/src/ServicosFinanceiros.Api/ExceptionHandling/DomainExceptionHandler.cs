@@ -5,16 +5,10 @@ using ServicosFinanceiros.Domain.Exceptions;
 namespace ServicosFinanceiros.Api.ExceptionHandling;
 
 /// <summary>Traduz exceções de domínio em respostas HTTP no formato ProblemDetails.</summary>
-public sealed class DomainExceptionHandler : IExceptionHandler
+public sealed class DomainExceptionHandler(IProblemDetailsService problemDetailsService, ILogger<DomainExceptionHandler> logger) : IExceptionHandler
 {
-    private readonly IProblemDetailsService _problemDetailsService;
-    private readonly ILogger<DomainExceptionHandler> _logger;
-
-    public DomainExceptionHandler(IProblemDetailsService problemDetailsService, ILogger<DomainExceptionHandler> logger)
-    {
-        _problemDetailsService = problemDetailsService;
-        _logger = logger;
-    }
+    private readonly IProblemDetailsService _problemDetailsService = problemDetailsService;
+    private readonly ILogger<DomainExceptionHandler> _logger = logger;
 
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,

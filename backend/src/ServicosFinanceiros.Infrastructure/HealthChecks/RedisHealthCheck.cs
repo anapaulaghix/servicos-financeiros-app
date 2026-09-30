@@ -7,14 +7,9 @@ namespace ServicosFinanceiros.Infrastructure.HealthChecks;
 /// Redis fora do ar não impede lançamentos (o rate limiting falha aberto), então o estado é
 /// Degraded, não Unhealthy: a instância continua apta a receber tráfego.
 /// </summary>
-internal sealed class RedisHealthCheck : IHealthCheck
+internal sealed class RedisHealthCheck(IConnectionMultiplexer redis) : IHealthCheck
 {
-    private readonly IConnectionMultiplexer _redis;
-
-    public RedisHealthCheck(IConnectionMultiplexer redis)
-    {
-        _redis = redis;
-    }
+    private readonly IConnectionMultiplexer _redis = redis;
 
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,

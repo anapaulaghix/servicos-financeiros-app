@@ -10,14 +10,9 @@ namespace ServicosFinanceiros.Api.RateLimiting;
 /// (o IP real chega via X-Forwarded-For, tratado pelo UseForwardedHeaders antes deste middleware).
 /// Acima do limite responde 429 com ProblemDetails e o cabeçalho Retry-After.
 /// </summary>
-public sealed class RateLimitingMiddleware
+public sealed class RateLimitingMiddleware(RequestDelegate next)
 {
-    private readonly RequestDelegate _next;
-
-    public RateLimitingMiddleware(RequestDelegate next)
-    {
-        _next = next;
-    }
+    private readonly RequestDelegate _next = next;
 
     public async Task InvokeAsync(
         HttpContext context,

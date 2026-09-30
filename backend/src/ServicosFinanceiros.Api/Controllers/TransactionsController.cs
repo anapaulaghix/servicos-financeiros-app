@@ -8,14 +8,9 @@ namespace ServicosFinanceiros.Api.Controllers;
 [ApiController]
 [Route("api/transactions")]
 [Produces("application/json")]
-public sealed class TransactionsController : ControllerBase
+public sealed class TransactionsController(IProcessTransactionHandler handler) : ControllerBase
 {
-    private readonly IProcessTransactionHandler _handler;
-
-    public TransactionsController(IProcessTransactionHandler handler)
-    {
-        _handler = handler;
-    }
+    private readonly IProcessTransactionHandler _handler = handler;
 
     /// <summary>Processa um evento de crédito ou débito em uma conta.</summary>
     /// <response code="201">Evento processado; retorna o lançamento e o saldo resultante.</response>

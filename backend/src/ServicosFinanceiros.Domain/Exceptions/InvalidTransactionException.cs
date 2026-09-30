@@ -1,8 +1,5 @@
 namespace ServicosFinanceiros.Domain.Exceptions;
 
-public sealed class InvalidTransactionException : DomainException
+public sealed class InvalidTransactionException(string message) : DomainException(message)
 {
-    public InvalidTransactionException(string message) : base(message)
-    {
-    }
 }

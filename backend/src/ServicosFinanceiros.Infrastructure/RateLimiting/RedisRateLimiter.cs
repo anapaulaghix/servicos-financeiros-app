@@ -7,7 +7,7 @@ namespace ServicosFinanceiros.Infrastructure.RateLimiting;
 /// Janela fixa no Redis: um contador por política e cliente, que expira junto com a janela.
 /// Como o estado fica no Redis, o limite vale para todas as instâncias da API, não por processo.
 /// </summary>
-internal sealed class RedisRateLimiter : IRateLimiter
+internal sealed class RedisRateLimiter(IConnectionMultiplexer redis, ILogger<RedisRateLimiter> logger) : IRateLimiter
 {
     // INCR e PEXPIRE no mesmo script: a operação é atômica no Redis, então requisições simultâneas
     // nunca "perdem" incrementos nem criam um contador sem expiração.
@@ -20,14 +20,8 @@ internal sealed class RedisRateLimiter : IRateLimiter
         return { current, redis.call('PTTL', @key) }
         """);
 
-    private readonly IConnectionMultiplexer _redis;
-    private readonly ILogger<RedisRateLimiter> _logger;
-
-    public RedisRateLimiter(IConnectionMultiplexer redis, ILogger<RedisRateLimiter> logger)
-    {
-        _redis = redis;
-        _logger = logger;
-    }
+    private readonly IConnectionMultiplexer _redis = redis;
+    private readonly ILogger<RedisRateLimiter> _logger = logger;
 
     public async Task<RateLimitDecision> AcquireAsync(
         string policy,

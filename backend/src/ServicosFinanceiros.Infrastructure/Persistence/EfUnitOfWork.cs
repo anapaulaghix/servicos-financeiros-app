@@ -4,14 +4,9 @@ using ServicosFinanceiros.Application.Abstractions;
 
 namespace ServicosFinanceiros.Infrastructure.Persistence;
 
-internal sealed class EfUnitOfWork : IUnitOfWork
+internal sealed class EfUnitOfWork(AppDbContext dbContext) : IUnitOfWork
 {
-    private readonly AppDbContext _dbContext;
-
-    public EfUnitOfWork(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
+    private readonly AppDbContext _dbContext = dbContext;
 
     public async Task<T> ExecuteInTransactionAsync<T>(
         Func<CancellationToken, Task<T>> work,

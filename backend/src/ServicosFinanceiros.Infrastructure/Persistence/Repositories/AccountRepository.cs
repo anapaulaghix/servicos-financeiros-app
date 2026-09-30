@@ -4,14 +4,9 @@ using ServicosFinanceiros.Domain.Accounts;
 
 namespace ServicosFinanceiros.Infrastructure.Persistence.Repositories;
 
-internal sealed class AccountRepository : IAccountRepository
+internal sealed class AccountRepository(AppDbContext dbContext) : IAccountRepository
 {
-    private readonly AppDbContext _dbContext;
-
-    public AccountRepository(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
+    private readonly AppDbContext _dbContext = dbContext;
 
     public Task<Account?> GetByIdForUpdateAsync(Guid accountId, CancellationToken cancellationToken)
     {

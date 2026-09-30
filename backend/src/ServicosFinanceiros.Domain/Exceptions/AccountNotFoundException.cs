@@ -1,12 +1,6 @@
 namespace ServicosFinanceiros.Domain.Exceptions;
 
-public sealed class AccountNotFoundException : DomainException
+public sealed class AccountNotFoundException(Guid accountId) : DomainException($"Conta {accountId} não encontrada.")
 {
-    public AccountNotFoundException(Guid accountId)
-        : base($"Conta {accountId} não encontrada.")
-    {
-        AccountId = accountId;
-    }
-
-    public Guid AccountId { get; }
+    public Guid AccountId { get; } = accountId;
 }

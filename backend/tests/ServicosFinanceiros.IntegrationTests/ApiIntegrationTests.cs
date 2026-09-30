@@ -15,18 +15,12 @@ namespace ServicosFinanceiros.IntegrationTests;
 /// HTTP de ponta a ponta — health checks, rate limiting e o IP do cliente vindo do proxy.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-public class ApiIntegrationTests
+public class ApiIntegrationTests(PostgresFixture postgres, RedisFixture redis)
 {
     private const int PermitLimit = 3;
 
-    private readonly PostgresFixture _postgres;
-    private readonly RedisFixture _redis;
-
-    public ApiIntegrationTests(PostgresFixture postgres, RedisFixture redis)
-    {
-        _postgres = postgres;
-        _redis = redis;
-    }
+    private readonly PostgresFixture _postgres = postgres;
+    private readonly RedisFixture _redis = redis;
 
     /// <summary>
     /// Cria a API simulando que toda requisição chega de <paramref name="remoteIp"/>

@@ -9,16 +9,10 @@ namespace ServicosFinanceiros.IntegrationTests;
 
 /// <summary>Rate limiter contra um Redis real, resolvido pelo mesmo registro de IoC da API.</summary>
 [Collection(PostgresCollection.Name)]
-public class RedisRateLimiterIntegrationTests
+public class RedisRateLimiterIntegrationTests(PostgresFixture postgres, RedisFixture redis)
 {
-    private readonly PostgresFixture _postgres;
-    private readonly RedisFixture _redis;
-
-    public RedisRateLimiterIntegrationTests(PostgresFixture postgres, RedisFixture redis)
-    {
-        _postgres = postgres;
-        _redis = redis;
-    }
+    private readonly PostgresFixture _postgres = postgres;
+    private readonly RedisFixture _redis = redis;
 
     private ServiceProvider BuildServices(string? redisConnectionString)
     {

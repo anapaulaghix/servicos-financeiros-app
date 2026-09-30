@@ -4,14 +4,9 @@ using ServicosFinanceiros.Domain.Accounts;
 
 namespace ServicosFinanceiros.Infrastructure.Persistence.Repositories;
 
-internal sealed class AccountQueries : IAccountQueries
+internal sealed class AccountQueries(AppDbContext dbContext) : IAccountQueries
 {
-    private readonly AppDbContext _dbContext;
-
-    public AccountQueries(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
+    private readonly AppDbContext _dbContext = dbContext;
 
     public async Task<IReadOnlyList<AccountSummary>> ListAsync(CancellationToken cancellationToken)
     {

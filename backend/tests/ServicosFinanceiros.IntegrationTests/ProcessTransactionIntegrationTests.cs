@@ -12,14 +12,9 @@ namespace ServicosFinanceiros.IntegrationTests;
 /// idempotência, consistência do saldo, transacionalidade e concorrência.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-public class ProcessTransactionIntegrationTests
+public class ProcessTransactionIntegrationTests(PostgresFixture fixture)
 {
-    private readonly PostgresFixture _fixture;
-
-    public ProcessTransactionIntegrationTests(PostgresFixture fixture)
-    {
-        _fixture = fixture;
-    }
+    private readonly PostgresFixture _fixture = fixture;
 
     /// <summary>Executa um evento em um escopo próprio, como faria uma requisição HTTP independente.</summary>
     private async Task<Transaction> ProcessAsync(Guid accountId, TransactionType type, decimal amount, Guid? eventId = null)

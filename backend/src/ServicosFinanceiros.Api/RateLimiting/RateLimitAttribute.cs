@@ -5,12 +5,7 @@ namespace ServicosFinanceiros.Api.RateLimiting;
 /// Aplicado no endpoint, e não globalmente, para limitar só o que tem custo ou risco, como lançamentos.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-public sealed class RateLimitAttribute : Attribute
+public sealed class RateLimitAttribute(string policy) : Attribute
 {
-    public RateLimitAttribute(string policy)
-    {
-        Policy = policy;
-    }
-
-    public string Policy { get; }
+    public string Policy { get; } = policy;
 }

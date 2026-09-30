@@ -1,12 +1,6 @@
 namespace ServicosFinanceiros.Domain.Exceptions;
 
-public sealed class DuplicateEventException : DomainException
+public sealed class DuplicateEventException(Guid eventId) : DomainException($"O evento {eventId} já foi processado.")
 {
-    public DuplicateEventException(Guid eventId)
-        : base($"O evento {eventId} já foi processado.")
-    {
-        EventId = eventId;
-    }
-
-    public Guid EventId { get; }
+    public Guid EventId { get; } = eventId;
 }

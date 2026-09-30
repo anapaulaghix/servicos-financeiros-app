@@ -4,14 +4,9 @@ using ServicosFinanceiros.Domain.Accounts;
 
 namespace ServicosFinanceiros.Infrastructure.Persistence.Repositories;
 
-internal sealed class TransactionRepository : ITransactionRepository
+internal sealed class TransactionRepository(AppDbContext dbContext) : ITransactionRepository
 {
-    private readonly AppDbContext _dbContext;
-
-    public TransactionRepository(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
+    private readonly AppDbContext _dbContext = dbContext;
 
     public Task<bool> ExistsAsync(Guid eventId, CancellationToken cancellationToken)
     {
