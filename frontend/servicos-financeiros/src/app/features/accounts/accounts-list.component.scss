@@ -42,7 +42,9 @@
   height: 100%;
   padding: 24px;
   text-decoration: none;
-  transition: background 120ms, color 120ms;
+  transition:
+    background 120ms,
+    color 120ms;
 
   &__index {
     font-size: 12px;

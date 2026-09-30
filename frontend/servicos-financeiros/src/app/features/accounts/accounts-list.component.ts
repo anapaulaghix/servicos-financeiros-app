@@ -31,9 +31,7 @@ export class AccountsListComponent {
   private readonly reload$ = new BehaviorSubject<void>(undefined);
 
   /** Cada `reload` volta a emitir `loading` antes de buscar de novo. */
-  protected readonly state$ = this.reload$.pipe(
-    switchMap(() => this.api.list().pipe(toLoadState())),
-  );
+  protected readonly state$ = this.reload$.pipe(switchMap(() => this.api.list().pipe(toLoadState())));
 
   protected reload(): void {
     this.reload$.next();

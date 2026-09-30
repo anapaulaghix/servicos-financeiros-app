@@ -11,15 +11,15 @@ export class AccountsApi {
   private readonly http = inject(HttpClient);
 
   list(): Observable<Account[]> {
-    return this.http.get<Account[]>(`${API_BASE}/accounts`).pipe(
-      catchError((error) => throwError(() => toApiError(error))),
-    );
+    return this.http
+      .get<Account[]>(`${API_BASE}/accounts`)
+      .pipe(catchError((error) => throwError(() => toApiError(error))));
   }
 
   get(accountId: string): Observable<Account> {
-    return this.http.get<Account>(`${API_BASE}/accounts/${accountId}`).pipe(
-      catchError((error) => throwError(() => toApiError(error))),
-    );
+    return this.http
+      .get<Account>(`${API_BASE}/accounts/${accountId}`)
+      .pipe(catchError((error) => throwError(() => toApiError(error))));
   }
 
   /** Extrato paginado. `page` começa em 1, como na API. */

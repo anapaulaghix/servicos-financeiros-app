@@ -63,7 +63,7 @@ import { Submission, ERROR_TITLES } from '../../core/models/transaction.model';
     PageHeaderComponent,
     ErrorPanelComponent,
     DynamicValidatorMessageDirective,
-],
+  ],
   providers: [{ provide: ErrorStateMatcherService, useClass: OnTouchedErrorStateMatcherService }],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './new-transaction.component.html',

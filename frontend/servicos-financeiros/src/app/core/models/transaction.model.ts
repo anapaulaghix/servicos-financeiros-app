@@ -1,5 +1,5 @@
-import { ApiError, ApiErrorKind } from "../errors/api-error";
-import { TransactionResult } from "./account.model";
+import { ApiError, ApiErrorKind } from '../errors/api-error';
+import { TransactionResult } from './account.model';
 
 export type Submission =
   | { status: 'idle' }

@@ -11,8 +11,8 @@ export class TransactionsApi {
   private readonly http = inject(HttpClient);
 
   submit(request: TransactionRequest): Observable<TransactionResult> {
-    return this.http.post<TransactionResult>(`${API_BASE}/transactions`, request).pipe(
-      catchError((error) => throwError(() => toApiError(error))),
-    );
+    return this.http
+      .post<TransactionResult>(`${API_BASE}/transactions`, request)
+      .pipe(catchError((error) => throwError(() => toApiError(error))));
   }
 }

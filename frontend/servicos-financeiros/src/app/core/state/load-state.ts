@@ -4,9 +4,7 @@ import { ApiError, toApiError } from '../errors/api-error';
 
 /** Os três estados de qualquer carga de dados exibida na tela. */
 export type LoadState<T> =
-  | { status: 'loading' }
-  | { status: 'ready'; data: T }
-  | { status: 'error'; error: ApiError };
+  { status: 'loading' } | { status: 'ready'; data: T } | { status: 'error'; error: ApiError };
 
 /**
  * Converte um Observable de dados em um fluxo de estados de tela. Usado dentro de um `switchMap`,

@@ -32,6 +32,9 @@ const VALID_CLASS = 'field-valid';
  * campo específico, use o atributo `withoutFormValidation`.
  */
 @Directive({
+  // Exceção intencional ao prefixo "app": a diretiva precisa se anexar sozinha aos controles de
+  // formulário do Angular, que é justamente o que dispensa markup de erro nos templates.
+  // eslint-disable-next-line @angular-eslint/directive-selector
   selector: `
     [ngModel]:not([withoutFormValidation]),
     [formControl]:not([withoutFormValidation]),

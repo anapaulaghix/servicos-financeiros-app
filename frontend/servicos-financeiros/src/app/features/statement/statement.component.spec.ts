@@ -14,7 +14,10 @@ describe('StatementComponent', () => {
   const statementRequest = (): TestRequest =>
     http.expectOne((r) => r.url === '/api/accounts/acc-1/transactions');
 
-  const page = (items: StatementEntry[], overrides: Partial<Page<StatementEntry>> = {}): Page<StatementEntry> => ({
+  const page = (
+    items: StatementEntry[],
+    overrides: Partial<Page<StatementEntry>> = {},
+  ): Page<StatementEntry> => ({
     items,
     page: 1,
     pageSize: 10,
@@ -53,8 +56,20 @@ describe('StatementComponent', () => {
     http.expectOne('/api/accounts/acc-1').flush(ACCOUNTS[0]);
     statementRequest().flush(
       page([
-        entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000002', type: 'DEBIT', amount: 40, signedAmount: -40, balanceAfter: 60 }),
-        entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000001', type: 'CREDIT', amount: 100, signedAmount: 100, balanceAfter: 100 }),
+        entry({
+          eventId: 'aaaaaaaa-0000-0000-0000-000000000002',
+          type: 'DEBIT',
+          amount: 40,
+          signedAmount: -40,
+          balanceAfter: 60,
+        }),
+        entry({
+          eventId: 'aaaaaaaa-0000-0000-0000-000000000001',
+          type: 'CREDIT',
+          amount: 100,
+          signedAmount: 100,
+          balanceAfter: 100,
+        }),
       ]),
     );
     fixture.detectChanges();
@@ -81,7 +96,13 @@ describe('StatementComponent', () => {
 
   it('ao trocar de página, pede a página seguinte à API (que começa em 1)', () => {
     http.expectOne('/api/accounts/acc-1').flush(ACCOUNTS[0]);
-    statementRequest().flush(page([entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000001' })], { pageSize: 5, totalItems: 12, totalPages: 3 }));
+    statementRequest().flush(
+      page([entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000001' })], {
+        pageSize: 5,
+        totalItems: 12,
+        totalPages: 3,
+      }),
+    );
     fixture.detectChanges();
 
     fixture.debugElement.query(By.css('p-table')).triggerEventHandler('onPage', { first: 5, rows: 5 });
@@ -89,12 +110,25 @@ describe('StatementComponent', () => {
     const next = statementRequest();
     expect(next.request.params.get('page')).toBe('2');
     expect(next.request.params.get('pageSize')).toBe('5');
-    next.flush(page([entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000002' })], { page: 2, pageSize: 5, totalItems: 12, totalPages: 3 }));
+    next.flush(
+      page([entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000002' })], {
+        page: 2,
+        pageSize: 5,
+        totalItems: 12,
+        totalPages: 3,
+      }),
+    );
   });
 
   it('mantém a tabela visível enquanto a próxima página carrega', () => {
     http.expectOne('/api/accounts/acc-1').flush(ACCOUNTS[0]);
-    statementRequest().flush(page([entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000001' })], { pageSize: 5, totalItems: 12, totalPages: 3 }));
+    statementRequest().flush(
+      page([entry({ eventId: 'aaaaaaaa-0000-0000-0000-000000000001' })], {
+        pageSize: 5,
+        totalItems: 12,
+        totalPages: 3,
+      }),
+    );
     fixture.detectChanges();
 
     fixture.debugElement.query(By.css('p-table')).triggerEventHandler('onPage', { first: 5, rows: 5 });

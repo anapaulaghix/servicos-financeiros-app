@@ -26,7 +26,7 @@ import { Paging, StatementView } from '../../core/models/statement.models';
     PageHeaderComponent,
     LoadingComponent,
     ErrorPanelComponent,
-    SignedMoneyPipe
+    SignedMoneyPipe,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './statement.component.html',

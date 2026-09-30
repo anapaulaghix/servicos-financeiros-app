@@ -2,7 +2,11 @@
 
 @if (accountsState(); as state) {
   @if (state.status === 'error') {
-    <app-error-panel [error]="state.error" title="Não foi possível carregar as contas" (retry)="reloadAccounts()" />
+    <app-error-panel
+      [error]="state.error"
+      title="Não foi possível carregar as contas"
+      (retry)="reloadAccounts()"
+    />
   }
 }
 <div class="layout">
@@ -88,7 +92,9 @@
         <p class="eyebrow muted">Saldo atual</p>
         <p class="summary__balance num">{{ account.balance | currency: 'BRL' }}</p>
 
-        @if (projectedBalance(); as projected) {
+        <!-- Compara com null: um saldo projetado de R$ 0,00 é falso para o @if, mas precisa aparecer. -->
+        @let projected = projectedBalance();
+        @if (projected !== null) {
           <p class="eyebrow muted">Saldo após o lançamento</p>
           <p class="summary__balance summary__balance--projected num" [class.is-negative]="wouldOverdraw()">
             {{ projected | currency: 'BRL' }}
@@ -129,8 +135,8 @@
             <p>{{ current.error.message }}</p>
             @if (isRetrySafe(current.error)) {
               <p class="hint">
-                Você pode tentar de novo com segurança: se o lançamento já tiver chegado ao servidor,
-                ele não será registrado duas vezes.
+                Você pode tentar de novo com segurança: se o lançamento já tiver chegado ao servidor, ele não
+                será registrado duas vezes.
               </p>
             }
           </div>

@@ -14,7 +14,11 @@ describe('Layout', () => {
     TestBed.configureTestingModule({
       providers: [
         provideRouter([
-          { path: '', component: MainLayoutComponent, children: [{ path: 'contas', component: FakePageComponent }] },
+          {
+            path: '',
+            component: MainLayoutComponent,
+            children: [{ path: 'contas', component: FakePageComponent }],
+          },
         ]),
       ],
     });

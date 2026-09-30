@@ -20,7 +20,9 @@ describe('API services', () => {
   describe('AccountsApi', () => {
     it('lista contas em GET /api/accounts', () => {
       let result: unknown;
-      TestBed.inject(AccountsApi).list().subscribe((accounts) => (result = accounts));
+      TestBed.inject(AccountsApi)
+        .list()
+        .subscribe((accounts) => (result = accounts));
 
       const request = http.expectOne('/api/accounts');
       expect(request.request.method).toBe('GET');

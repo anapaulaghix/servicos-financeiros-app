@@ -15,7 +15,12 @@ import { ApiError } from '../../core/errors/api-error';
         <p class="panel__title">{{ title() }}</p>
         <p>{{ error().message }}</p>
         @if (retryable()) {
-          <p-button label="Tentar novamente" severity="secondary" [outlined]="true" (onClick)="retry.emit()" />
+          <p-button
+            label="Tentar novamente"
+            severity="secondary"
+            [outlined]="true"
+            (onClick)="retry.emit()"
+          />
         }
       </div>
     </p-message>

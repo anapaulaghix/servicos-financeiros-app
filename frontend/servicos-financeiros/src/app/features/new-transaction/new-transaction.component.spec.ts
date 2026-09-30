@@ -50,7 +50,10 @@ describe('NewTransactionComponent', () => {
   const expectPost = (): TestRequest => http.expectOne('/api/transactions');
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [NewTransactionComponent], providers: provideTestEnvironment() });
+    TestBed.configureTestingModule({
+      imports: [NewTransactionComponent],
+      providers: provideTestEnvironment(),
+    });
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(NewTransactionComponent);
     component = fixture.componentInstance;
@@ -117,6 +120,14 @@ describe('NewTransactionComponent', () => {
       fillValid('CREDIT', 100);
 
       expect(textOf(root())).toContain('R$ 1.600,00');
+    });
+
+    it('mostra a prévia mesmo quando o saldo projetado é exatamente zero', () => {
+      fillValid('DEBIT', 1500); // conta com R$ 1.500,00
+
+      const summary = textOf(root().querySelector('.summary') as HTMLElement);
+      expect(summary).toContain('Saldo após o lançamento');
+      expect(summary).toContain('R$ 0,00');
     });
 
     it('avisa quando um débito excede o saldo, sem impedir o envio (o servidor decide)', () => {
@@ -188,7 +199,9 @@ describe('NewTransactionComponent', () => {
       submit();
       submit();
 
-      expectPost().flush(result);
+      const requests = http.match('/api/transactions');
+      expect(requests.length).toBe(1);
+      requests[0].flush(result);
       http.expectOne('/api/accounts').flush(ACCOUNTS);
     });
   });

@@ -1,13 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 
 export type ApiErrorKind =
-  | 'network'
-  | 'validation'
-  | 'duplicate'
-  | 'insufficient-funds'
-  | 'not-found'
-  | 'rate-limited'
-  | 'server';
+  'network' | 'validation' | 'duplicate' | 'insufficient-funds' | 'not-found' | 'rate-limited' | 'server';
 
 /**
  * Erro da API já traduzido para a linguagem da interface. Os componentes tratam `kind`,
@@ -85,9 +79,10 @@ export function toApiError(error: unknown): ApiError {
 /** Usa o Retry-After (em segundos) enviado pela API para dizer quanto tempo esperar. */
 function rateLimitedMessage(error: HttpErrorResponse): string {
   const seconds = Number(error.headers?.get('Retry-After'));
-  const wait = Number.isFinite(seconds) && seconds > 0
-    ? `Aguarde ${seconds} ${seconds === 1 ? 'segundo' : 'segundos'}`
-    : 'Aguarde alguns segundos';
+  const wait =
+    Number.isFinite(seconds) && seconds > 0
+      ? `Aguarde ${seconds} ${seconds === 1 ? 'segundo' : 'segundos'}`
+      : 'Aguarde alguns segundos';
 
   return `Muitos lançamentos em pouco tempo. ${wait} e tente novamente; nada foi lançado.`;
 }
